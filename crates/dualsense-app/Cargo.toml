@@ -1,0 +1,27 @@
+[package]
+name = "dualsense-app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "dualsense-studio"
+path = "src/main.rs"
+
+[dependencies]
+dualsense-core = { path = "../dualsense-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+dirs = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

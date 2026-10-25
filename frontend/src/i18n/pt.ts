@@ -1,5 +1,5 @@
 export const pt = {
-  app_subtitle: "COMPANHEIRO STEAM & PONTE DE CONSOLE",
+  app_subtitle: "DUALSENSE STUDIO & PONTE DE CONSOLE",
   hud_ready: "PRONTO",
   tab_overview: "Visão Geral",
   tab_steam: "Ponte Steam",
@@ -8,7 +8,7 @@ export const pt = {
 
   // Overview
   overview_title: "Visão Geral do Sistema",
-  overview_desc: "O Steam Companion conecta jogos fora da Steam, emuladores e gatilhos de hardware DualSense diretamente ao ecossistema da Valve.",
+  overview_desc: "O DualSense Studio conecta jogos fora da Steam, emuladores e gatilhos de hardware DualSense diretamente ao ecossistema da Valve.",
   metric_steam_status: "Integração Steam",
   status_shortcuts_synced: "Atalhos Ativos",
   metric_dualsense_status: "DualSense Studio",
@@ -16,7 +16,7 @@ export const pt = {
   btn_quick_sync_steam: "Exportar Tudo para Steam",
   btn_quick_rescan: "Escanear ROMs & Jogos",
   callout_philosophy_title: "Projetado para Acompanhar a Steam, Não Substituí-la:",
-  callout_philosophy_body: "O Steam Companion roda silenciosamente na Bandeja do Sistema (System Tray). Inicie seus jogos pela Steam; o Steam Companion garante atalhos sincronizados, AppIDs determinísticos, notificações de conquistas e efeitos de gatilhos do DualSense sob demanda.",
+  callout_philosophy_body: "O DualSense Studio roda silenciosamente na Bandeja do Sistema (System Tray). Inicie seus jogos pela Steam; o DualSense Studio garante atalhos sincronizados, AppIDs determinísticos, notificações de conquistas e efeitos de gatilhos do DualSense sob demanda.",
 
   // Steam Bridge
   steam_bridge_title: "Biblioteca Steam & Ponte shortcuts.vdf",
@@ -64,7 +64,7 @@ export const pt = {
   toast_steam_path_saved: "Caminho da Steam configurado com sucesso.",
   toast_steam_path_reset: "Detecção automática da Steam restaurada.",
   modal_folders_title: "Pastas Configuradas de Jogos & ROMs",
-  modal_folders_desc: "O Steam Companion irá procurar por jogos avulsos, emuladores e arquivos de ROM nos seguintes diretórios cadastrados.",
+  modal_folders_desc: "O DualSense Studio irá procurar por jogos avulsos, emuladores e arquivos de ROM nos seguintes diretórios cadastrados.",
   field_add_folder: "Caminho da Pasta (ex: D:\\Roms ou C:\\Games)",
   btn_add_folder: "+ Adicionar Pasta",
   btn_scan_all_folders: "Escanear Pastas Configuradas",
@@ -76,7 +76,7 @@ export const pt = {
   setting_cdp_listener: "Ponte de Conquistas Chrome DevTools Protocol (CDP)",
   setting_cdp_listener_sub: "Conecta ao websocket da interface da Steam para exibir notificações nativas de conquistas para emuladores (RPCS3, RetroArch).",
   setting_steam_tags: "Tags Categorizadas no Big Picture",
-  setting_steam_tags_sub: "Adiciona marcadores automáticos por sistema de emulador (ex: 'Game Boy Advance', 'PlayStation 2', 'Steam Companion').",
+  setting_steam_tags_sub: "Adiciona marcadores automáticos por sistema de emulador (ex: 'Game Boy Advance', 'PlayStation 2', 'DualSense Studio').",
   discovered_games_title: "TÍTULOS NÃO-STEAM INDEXADOS",
   th_title: "Título",
   th_platform: "Plataforma",
@@ -198,7 +198,7 @@ export const pt = {
   dualsense_udp_last_client: "Último Jogo / Mod Conectado",
   dualsense_udp_no_traffic: "Aguardando telemetria de jogos...",
   dualsense_udp_compatible_title: "Mods de Jogos Compatíveis",
-  dualsense_udp_compatible_desc: "Mods de telemetria se comunicam diretamente com o Steam Companion na porta 6969 sem necessidade de programas extras.",
+  dualsense_udp_compatible_desc: "Mods de telemetria se comunicam diretamente com o DualSense Studio na porta 6969 sem necessidade de programas extras.",
 
   // Profiles Studio
   dualsense_profiles_title: "Perfis Selecionados por Gênero",
@@ -216,7 +216,7 @@ export const pt = {
   utilities_btn_visit: "Acessar Site Oficial",
   utilities_btn_steam: "Ver na Steam Store",
   utilities_what_is_it: "O que é:",
-  utilities_how_to_use: "Dica Steam Companion:",
+  utilities_how_to_use: "Dica DualSense Studio:",
   toast_url_opened: "Link aberto no navegador padrão.",
   toast_url_failed: "Não foi possível abrir o link.",
 

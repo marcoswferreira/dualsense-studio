@@ -1,5 +1,5 @@
 export const en = {
-  app_subtitle: "STEAM COMPANION & CONSOLE BRIDGE",
+  app_subtitle: "DUALSENSE STUDIO & CONSOLE BRIDGE",
   hud_ready: "READY",
   tab_overview: "Overview",
   tab_steam: "Steam Bridge",
@@ -8,7 +8,7 @@ export const en = {
 
   // Overview
   overview_title: "System Overview",
-  overview_desc: "Steam Companion connects non-Steam games, emulators, and DualSense hardware triggers directly into Valve's Steam ecosystem.",
+  overview_desc: "DualSense Studio connects non-Steam games, emulators, and DualSense hardware triggers directly into Valve's Steam ecosystem.",
   metric_steam_status: "Steam Integration",
   status_shortcuts_synced: "Shortcuts Active",
   metric_dualsense_status: "DualSense Studio",
@@ -16,7 +16,7 @@ export const en = {
   btn_quick_sync_steam: "Export All to Steam",
   btn_quick_rescan: "Scan ROMs & Games",
   callout_philosophy_title: "Built to Accompany Steam, Not Replace It:",
-  callout_philosophy_body: "Steam Companion runs quietly in the System Tray. Launch games via Steam; Steam Companion ensures shortcuts, deterministic AppIDs, achievement toasts, and optional PS5 DualSense trigger effects are automated.",
+  callout_philosophy_body: "DualSense Studio runs quietly in the System Tray. Launch games via Steam; DualSense Studio ensures shortcuts, deterministic AppIDs, achievement toasts, and optional PS5 DualSense trigger effects are automated.",
 
   // Steam Bridge
   steam_bridge_title: "Steam Library & shortcuts.vdf Bridge",
@@ -64,7 +64,7 @@ export const en = {
   toast_steam_path_saved: "Steam path configured successfully.",
   toast_steam_path_reset: "Steam auto-detection restored.",
   modal_folders_title: "Configured Game & ROM Directories",
-  modal_folders_desc: "Steam Companion will scan these directories for standalone games, emulators, and ROM files.",
+  modal_folders_desc: "DualSense Studio will scan these directories for standalone games, emulators, and ROM files.",
   field_add_folder: "Folder Path (e.g. D:\\Roms or C:\\Games)",
   btn_add_folder: "+ Add Path",
   btn_scan_all_folders: "Scan Configured Folders",
@@ -76,7 +76,7 @@ export const en = {
   setting_cdp_listener: "Chrome DevTools Protocol (CDP) Achievement Bridge",
   setting_cdp_listener_sub: "Attaches to the Steam client UI websocket to render native Steam achievement popups for emulators (RPCS3, RetroArch).",
   setting_steam_tags: "Categorized Big Picture Tags",
-  setting_steam_tags_sub: "Automatically tags injected shortcuts by emulator system (e.g. 'Game Boy Advance', 'PlayStation 2', 'Steam Companion').",
+  setting_steam_tags_sub: "Automatically tags injected shortcuts by emulator system (e.g. 'Game Boy Advance', 'PlayStation 2', 'DualSense Studio').",
   discovered_games_title: "INDEXED NON-STEAM TITLES",
   th_title: "Title",
   th_platform: "Platform",
@@ -198,7 +198,7 @@ export const en = {
   dualsense_udp_last_client: "Last Connected Game / Mod",
   dualsense_udp_no_traffic: "Waiting for game telemetry...",
   dualsense_udp_compatible_title: "Compatible Game Telemetry Mods",
-  dualsense_udp_compatible_desc: "Game telemetry mods communicate automatically with Steam Companion on port 6969 without additional software.",
+  dualsense_udp_compatible_desc: "Game telemetry mods communicate automatically with DualSense Studio on port 6969 without additional software.",
 
   // Profiles Studio
   dualsense_profiles_title: "Curated Game & Genre Profiles",
@@ -216,7 +216,7 @@ export const en = {
   utilities_btn_visit: "Visit Official Site",
   utilities_btn_steam: "View on Steam Store",
   utilities_what_is_it: "What it is:",
-  utilities_how_to_use: "Steam Companion Tip:",
+  utilities_how_to_use: "DualSense Studio Tip:",
   toast_url_opened: "Link opened in default browser.",
   toast_url_failed: "Failed to open link.",
 

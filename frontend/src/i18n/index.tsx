@@ -18,13 +18,13 @@ const I18nContext = createContext<I18nContextType | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Language>(() => {
-    const saved = localStorage.getItem('kame_house_lang');
+    const saved = localStorage.getItem('dualsense_studio_lang') || localStorage.getItem('kame_house_lang');
     return saved === 'pt' ? 'pt' : 'en';
   });
 
   const setLang = (newLang: Language) => {
     setLangState(newLang);
-    localStorage.setItem('kame_house_lang', newLang);
+    localStorage.setItem('dualsense_studio_lang', newLang);
     fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

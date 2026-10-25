@@ -395,8 +395,8 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
             }}
           >
             {lang === 'pt'
-              ? 'Por padrão, a extensão DualSense permanece desligada para não consumir recursos em segundo plano nem monitorar portas USB/Bluetooth. Clique no botão abaixo para ativá-la agora, ou marque a opção acima caso deseje que ela inicie junto com o Steam Companion.'
-              : 'By default, the DualSense extension remains turned off so it does not consume background resources or poll USB/Bluetooth ports. Click the button below to enable it now, or check the option above if you want it to start automatically with Steam Companion.'}
+              ? 'Por padrão, a extensão DualSense permanece desligada para não consumir recursos em segundo plano nem monitorar portas USB/Bluetooth. Clique no botão abaixo para ativá-la agora, ou marque a opção acima caso deseje que ela inicie junto com o DualSense Studio.'
+              : 'By default, the DualSense extension remains turned off so it does not consume background resources or poll USB/Bluetooth ports. Click the button below to enable it now, or check the option above if you want it to start automatically with DualSense Studio.'}
           </p>
           <button
             className="deck-btn primary"

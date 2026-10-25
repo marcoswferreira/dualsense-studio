@@ -1,6 +1,6 @@
 # DualSense Studio
 
-Advanced PlayStation 5 DualSense controller companion, haptics & adaptive trigger tuner, ViGEmBus XInput/DS4 emulator, and Cemuhook Motion UDP server for Windows and Linux.
+Advanced PlayStation 5 DualSense controller suite, haptics & adaptive trigger tuner, ViGEmBus XInput/DS4 emulator, and Cemuhook Motion UDP server for Windows and Linux.
 
 ## Features
 

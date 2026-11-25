@@ -442,6 +442,31 @@ async fn route_request(
     }
 }
 
+fn resolve_ui_asset(rel: &str) -> Option<PathBuf> {
+    // 1. Standalone release layout: `<executable_dir>/ui/<asset>`
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let portable = exe_dir.join("ui").join(rel);
+            if portable.is_file() {
+                return Some(portable);
+            }
+        }
+    }
+    // 2. Current working directory `./ui/<asset>`
+    let cwd_candidate = PathBuf::from("ui").join(rel);
+    if cwd_candidate.is_file() {
+        return Some(cwd_candidate);
+    }
+    // 3. Development cargo workspace fallback
+    let dev_candidate = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("ui")
+        .join(rel);
+    if dev_candidate.is_file() {
+        return Some(dev_candidate);
+    }
+    None
+}
+
 fn serve_static_asset(path: &str) -> (u16, &'static str, &'static str, Vec<u8>) {
     let rel = match path {
         "/" | "" => "index.html",
@@ -451,21 +476,21 @@ fn serve_static_asset(path: &str) -> (u16, &'static str, &'static str, Vec<u8>) 
         return json_response(400, "Bad Request", &json!({ "error": "invalid path" }));
     }
 
-    let ui_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui");
-    let candidate = ui_dir.join(rel);
-    if let Ok(bytes) = std::fs::read(&candidate) {
-        let mime = if rel.ends_with(".html") {
-            "text/html; charset=utf-8"
-        } else if rel.ends_with(".js") {
-            "application/javascript; charset=utf-8"
-        } else if rel.ends_with(".css") {
-            "text/css; charset=utf-8"
-        } else if rel.ends_with(".svg") {
-            "image/svg+xml"
-        } else {
-            "application/octet-stream"
-        };
-        return (200, "OK", mime, bytes);
+    if let Some(candidate) = resolve_ui_asset(rel) {
+        if let Ok(bytes) = std::fs::read(&candidate) {
+            let mime = if rel.ends_with(".html") {
+                "text/html; charset=utf-8"
+            } else if rel.ends_with(".js") {
+                "application/javascript; charset=utf-8"
+            } else if rel.ends_with(".css") {
+                "text/css; charset=utf-8"
+            } else if rel.ends_with(".svg") {
+                "image/svg+xml"
+            } else {
+                "application/octet-stream"
+            };
+            return (200, "OK", mime, bytes);
+        }
     }
 
     json_response(404, "Not Found", &json!({ "error": "not found" }))

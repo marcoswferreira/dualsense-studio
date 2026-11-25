@@ -1,6 +1,10 @@
 # DualSense Studio
 
-Advanced PlayStation 5 DualSense controller suite, haptics & adaptive trigger tuner, ViGEmBus XInput/DS4 emulator, and Cemuhook Motion UDP server for Windows and Linux.
+[![CI](https://github.com/marcoswferreira/dualsense-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/marcoswferreira/dualsense-studio/actions/workflows/ci.yml)
+[![Release CD](https://github.com/marcoswferreira/dualsense-studio/actions/workflows/release.yml/badge.svg)](https://github.com/marcoswferreira/dualsense-studio/actions/workflows/release.yml)
+[![Security Audit](https://github.com/marcoswferreira/dualsense-studio/actions/workflows/security.yml/badge.svg)](https://github.com/marcoswferreira/dualsense-studio/actions/workflows/security.yml)
+
+Advanced PlayStation 5 DualSense controller suite, haptics & adaptive trigger tuner, Virtual DualSense / ViGEmBus XInput & DS4 emulator, Bluetooth HD Haptics (Report `0x32`), and Cemuhook Motion UDP server for Windows and Linux.
 
 ## Features
 
@@ -115,6 +119,12 @@ cargo fmt --all -- --check
 # Run Clippy lints
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+## CI/CD & Releases
+
+- **CI (`.github/workflows/ci.yml`)**: Runs on every push/PR to `main` — validates Frontend TypeScript + Vite build, Rust `fmt` + `clippy -D warnings`, Unit/E2E/Regression tests on both **Linux** and **Windows**, and builds portable standalone packages with SHA-256 checksums.
+- **Release CD (`.github/workflows/release.yml`)**: Push a semantic version tag (e.g., `git tag v0.1.0 && git push origin v0.1.0`) to automatically verify, package Linux (`.tar.gz` + `70-dualsense.rules`) and Windows (`.zip`) standalone bundles, generate `SHA256SUMS.txt`, and publish a GitHub Release.
+- **Security & Dependabot (`.github/workflows/security.yml`, `.github/dependabot.yml`)**: Weekly RustSec (`cargo audit`) and `npm audit` checks plus automated Cargo, npm, and GitHub Actions dependency updates.
 
 ## License
 

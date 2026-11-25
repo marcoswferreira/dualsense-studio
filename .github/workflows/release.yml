@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Linux HID Dependencies
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
@@ -81,7 +81,7 @@ jobs:
             binary_name: dualsense-studio.exe
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve Release Tag
         id: meta
@@ -160,7 +160,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve Release Tag
         id: meta

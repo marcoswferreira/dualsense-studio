@@ -22,7 +22,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 crc32fast = "1.4"
 byteorder = "1.5"
-parking_lot = "0.12"
+parking_lot = "0.13"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
 uuid = { version = "1.10", features = ["v4", "serde"] }
 tempfile = "3.12"

@@ -265,8 +265,9 @@ impl VirtualControllerBackend for UhidDualSenseBackend {
                 if ev_type == linux_uhid::UHID_OUTPUT && n >= 4 + 4096 + 2 {
                     let size = u16::from_ne_bytes([raw[4100], raw[4101]]) as usize;
                     let end = (4 + size).min(n);
-                    let payload = raw[4..end].to_vec();
-                    self.ingest_output_report(&payload);
+                    if let Some(ev) = decode_dualsense_usb_output_report(&raw[4..end]) {
+                        self.feedback_queue.push_back(ev);
+                    }
                 } else if ev_type == linux_uhid::UHID_GET_REPORT && n >= 10 {
                     let req_id = u32::from_ne_bytes([raw[4], raw[5], raw[6], raw[7]]);
                     let rnum = raw[8];

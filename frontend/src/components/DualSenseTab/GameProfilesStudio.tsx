@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { FolderKanban, Play, Plus, Rocket, Save, Trash2, X } from 'lucide-react';
 import { useTranslation } from '../../i18n';
 import {
   DualTriggerConfig,
@@ -59,137 +60,144 @@ export const GameProfilesStudio: React.FC<Props> = ({
   const handleAddRule = () => {
     const proc = newProc.trim();
     if (!proc) return;
-    const updated = [...gameRules, { process_name: proc, profile_id: ruleProfileId, enabled: true }];
-    onSaveGameRules(updated);
+    onSaveGameRules([...gameRules, { process_name: proc, profile_id: ruleProfileId, enabled: true }]);
     setNewProc('');
   };
 
-  const handleDeleteRule = (idx: number) => {
-    const updated = gameRules.filter((_, i) => i !== idx);
-    onSaveGameRules(updated);
-  };
-
   return (
-    <div className="profiles-studio-container" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div className="studio-header">
+    <>
+      <div className="page-header">
         <div>
-          <h3>{t('dualsense_profiles_title')}</h3>
-          <p className="section-subtitle">{t('dualsense_profiles_subtitle')}</p>
+          <h2 className="page-title">{t('dualsense_profiles_title')}</h2>
+          <p className="page-subtitle">{t('dualsense_profiles_subtitle')}</p>
         </div>
       </div>
 
-      <div className="profiles-grid">
+      <div className="grid-auto">
         {profiles.map((profile) => {
           const isCustom = !BUILTIN_IDS.has(profile.id);
           return (
-            <div key={profile.id} className="deck-card profile-card">
-              <div className="profile-card-top">
-                <h4>{profile.name}</h4>
-                <div
-                  className="profile-color-chip"
-                  style={{
-                    backgroundColor: `rgb(${profile.lightbar.r}, ${profile.lightbar.g}, ${profile.lightbar.b})`,
-                  }}
-                />
+            <div key={profile.id} className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '12px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: '#fff' }}>{profile.name}</span>
+                  <span
+                    style={{
+                      width: '14px',
+                      height: '14px',
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                      background: `rgb(${profile.lightbar.r}, ${profile.lightbar.g}, ${profile.lightbar.b})`,
+                      boxShadow: `0 0 8px rgba(${profile.lightbar.r}, ${profile.lightbar.g}, ${profile.lightbar.b}, 0.7)`,
+                    }}
+                  />
+                </div>
+                <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.45 }}>{profile.description}</p>
               </div>
-              <p className="card-desc">{profile.description}</p>
-              <div className="profile-details-preview">
-                <span className="badge-tag">L2: {profile.triggers.left.mode.toUpperCase()}</span>
-                <span className="badge-tag">R2: {profile.triggers.right.mode.toUpperCase()}</span>
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  className="deck-btn primary apply-profile-btn"
-                  onClick={() => onApplyProfile(profile.id)}
-                >
-                  🎮 {t('dualsense_apply_profile')}
-                </button>
-                {isCustom && (
-                  <button
-                    className="deck-btn danger"
-                    onClick={() => onDeleteCustomProfile(profile.id)}
-                  >
-                    🗑
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  <span className="chip">L2: {profile.triggers.left.mode.toUpperCase()}</span>
+                  <span className="chip">R2: {profile.triggers.right.mode.toUpperCase()}</span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className="btn primary" style={{ flex: 1 }} onClick={() => onApplyProfile(profile.id)}>
+                    <Play size={13} />
+                    {t('dualsense_apply_profile')}
                   </button>
-                )}
+                  {isCustom && (
+                    <button className="btn danger" onClick={() => onDeleteCustomProfile(profile.id)} aria-label="Delete profile">
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Save Current Setup as Custom Profile */}
-      <div className="deck-card">
-        <h4>💾 {lang === 'pt' ? 'Salvar Configuração Atual como Perfil' : 'Save Current Triggers & RGB as Custom Profile'}</h4>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="grid-2">
+        {/* Save Custom Profile */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div className="card-head" style={{ marginBottom: 0 }}>
+            <span className="card-title">
+              <Save size={15} color="#60a5fa" />
+              {lang === 'pt' ? 'Salvar Setup Atual como Perfil' : 'Save Current Setup as Profile'}
+            </span>
+          </div>
           <input
-            type="text"
-            className="deck-select"
-            placeholder={lang === 'pt' ? 'Nome do perfil (ex.: Cyberpunk)' : 'Profile name (e.g. Cyberpunk)'}
+            className="input"
+            placeholder={lang === 'pt' ? 'Nome do perfil (ex.: Cyberpunk 2077)' : 'Profile name (e.g. Cyberpunk 2077)'}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            style={{ minWidth: '200px' }}
           />
           <input
-            type="text"
-            className="deck-select"
+            className="input"
             placeholder={lang === 'pt' ? 'Descrição opcional' : 'Optional description'}
             value={newDesc}
             onChange={(e) => setNewDesc(e.target.value)}
-            style={{ minWidth: '240px' }}
           />
-          <button className="deck-btn primary" onClick={handleCreateProfile}>
-            + {lang === 'pt' ? 'Salvar Perfil' : 'Save Profile'}
-          </button>
-        </div>
-      </div>
-
-      {/* Standalone Per-Game Auto-Switch Rules */}
-      <div className="deck-card">
-        <h4>🚀 {lang === 'pt' ? 'Troca Automática por Processo de Jogo (Standalone)' : 'Auto-Switch Profile by Game Executable (Standalone)'}</h4>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '12px' }}>
-          <input
-            type="text"
-            className="deck-select"
-            placeholder="Cyberpunk2077.exe / Returnal.exe"
-            value={newProc}
-            onChange={(e) => setNewProc(e.target.value)}
-            style={{ minWidth: '240px' }}
-          />
-          <select
-            className="deck-select"
-            value={ruleProfileId}
-            onChange={(e) => setRuleProfileId(e.target.value)}
-          >
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-          <button className="deck-btn primary" onClick={handleAddRule}>
-            + {lang === 'pt' ? 'Adicionar Regra' : 'Add Rule'}
+          <button className="btn primary" onClick={handleCreateProfile} style={{ alignSelf: 'flex-start' }}>
+            <Plus size={14} />
+            {lang === 'pt' ? 'Salvar Perfil' : 'Save Profile'}
           </button>
         </div>
 
-        {gameRules.length === 0 ? (
-          <p className="section-subtitle" style={{ margin: 0 }}>
-            {lang === 'pt' ? 'Nenhuma regra automática configurada.' : 'No automatic game switching rules configured.'}
-          </p>
-        ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-            {gameRules.map((rule, idx) => (
-              <span key={`${rule.process_name}-${idx}`} className="badge-tag" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                {rule.process_name} → {rule.profile_id}
-                <button
-                  style={{ background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', padding: 0 }}
-                  onClick={() => handleDeleteRule(idx)}
-                >
-                  ✕
-                </button>
-              </span>
-            ))}
+        {/* Auto-Switch Rules */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div className="card-head" style={{ marginBottom: 0 }}>
+            <span className="card-title">
+              <Rocket size={15} color="#22d3ee" />
+              {lang === 'pt' ? 'Troca Automática por Executável' : 'Auto-Switch by Game Executable'}
+            </span>
+            <span className="chip"><FolderKanban size={11} /> {gameRules.length}</span>
           </div>
-        )}
+
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <input
+              className="input"
+              style={{ flex: 1, minWidth: '160px' }}
+              placeholder="Cyberpunk2077.exe / Returnal.exe"
+              value={newProc}
+              onChange={(e) => setNewProc(e.target.value)}
+            />
+            <select
+              className="select"
+              style={{ width: 'auto', minWidth: '150px' }}
+              value={ruleProfileId}
+              onChange={(e) => setRuleProfileId(e.target.value)}
+            >
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <button className="btn primary" onClick={handleAddRule}>
+              <Plus size={14} />
+            </button>
+          </div>
+
+          {gameRules.length === 0 ? (
+            <p className="page-subtitle" style={{ margin: 0 }}>
+              {lang === 'pt' ? 'Nenhuma regra automática configurada.' : 'No automatic game rules configured.'}
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {gameRules.map((rule, idx) => (
+                <span key={`${rule.process_name}-${idx}`} className="chip accent">
+                  {rule.process_name} → {rule.profile_id}
+                  <button
+                    onClick={() => onSaveGameRules(gameRules.filter((_, i) => i !== idx))}
+                    style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', display: 'inline-flex' }}
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 };

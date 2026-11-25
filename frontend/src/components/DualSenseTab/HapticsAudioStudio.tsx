@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Square, Vibrate, Waves, Zap } from 'lucide-react';
 import { useTranslation } from '../../i18n';
 import { HapticsConfig, HapticsMetrics, HapticsMode } from '../../types/models';
 
@@ -40,24 +41,27 @@ export const HapticsAudioStudio: React.FC<Props> = ({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div className="studio-header">
+    <>
+      <div className="page-header">
         <div>
-          <h3>{t('dualsense_haptics_title')}</h3>
-          <p className="section-subtitle">{t('dualsense_haptics_subtitle')}</p>
+          <h2 className="page-title">{t('dualsense_haptics_title')}</h2>
+          <p className="page-subtitle">{t('dualsense_haptics_subtitle')}</p>
         </div>
-        <span className={`badge-tag ${metrics.active ? 'live-badge' : ''}`}>
-          {connectionType.toUpperCase()} | {metrics.active ? `BT 0x32 @ ${metrics.sample_rate_hz} Hz` : 'STANDBY'}
+        <span className={`chip ${metrics.active ? 'success' : ''}`}>
+          {connectionType.toUpperCase()} · {metrics.active ? `BT 0x32 @ ${metrics.sample_rate_hz} Hz` : 'STANDBY'}
         </span>
       </div>
 
-      <div className="triggers-grid">
-        {/* Bluetooth HD Haptics & Audio-to-Haptics */}
-        <div className="deck-card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <h4 style={{ margin: 0 }}>🌊 Bluetooth HD Haptics (Report 0x32)</h4>
+      <div className="grid-2">
+        {/* Bluetooth HD Haptics (Report 0x32) */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div className="card-head" style={{ marginBottom: 0 }}>
+            <span className="card-title">
+              <Waves size={16} color="#22d3ee" />
+              Bluetooth HD Haptics (0x32)
+            </span>
             <button
-              className={`deck-btn ${haptics.enabled ? 'danger' : 'primary'}`}
+              className={`btn sm ${haptics.enabled ? 'danger' : 'primary'}`}
               onClick={() =>
                 commit({
                   ...haptics,
@@ -66,104 +70,71 @@ export const HapticsAudioStudio: React.FC<Props> = ({
                 })
               }
             >
-              {haptics.enabled ? 'Disable HD Haptics' : 'Enable HD Haptics'}
+              {haptics.enabled ? 'Disable' : 'Enable'}
             </button>
           </div>
 
-          <div className="form-group">
-            <label>Haptics Engine Mode</label>
-            <select
-              className="deck-select"
-              value={haptics.mode}
-              onChange={(e) => commit({ ...haptics, mode: e.target.value as HapticsMode })}
-            >
+          <div className="field">
+            <span className="field-label">Engine Mode</span>
+            <select className="select" value={haptics.mode} onChange={(e) => commit({ ...haptics, mode: e.target.value as HapticsMode })}>
               <option value="bluetooth_hd_haptics">Bluetooth HD Haptics (Report 0x32 — 3 kHz S8)</option>
-              <option value="audio_to_haptics">Audio-to-Haptics DSP (48 kHz Loopback → 3 kHz)</option>
-              <option value="legacy_rumble">Standard Rumble Motors (USB 0x02 / BT 0x31)</option>
+              <option value="audio_to_haptics">Audio-to-Haptics DSP (48 kHz → 3 kHz)</option>
+              <option value="legacy_rumble">Standard Rumble Motors (0x02 / 0x31)</option>
               <option value="off">Off</option>
             </select>
           </div>
 
-          <div className="effect-sliders">
-            <div className="slider-row">
-              <label>HD Haptics Gain: {Math.round(haptics.gain * 100)}%</label>
-              <input
-                type="range"
-                min="0"
-                max="2.0"
-                step="0.05"
-                value={haptics.gain}
-                onChange={(e) => commit({ ...haptics, gain: parseFloat(e.target.value) })}
-              />
-            </div>
+          <div className="field">
+            <div className="field-label"><span>HD Haptics Gain</span><span className="field-val">{Math.round(haptics.gain * 100)}%</span></div>
+            <input className="slider" type="range" min="0" max="2.0" step="0.05" value={haptics.gain} onChange={(e) => commit({ ...haptics, gain: parseFloat(e.target.value) })} />
+          </div>
 
-            <div className="slider-row">
-              <label>Low-Pass Filter Cutoff: {Math.round(haptics.lowpass_cutoff_hz)} Hz</label>
-              <input
-                type="range"
-                min="40"
-                max="500"
-                step="10"
-                value={haptics.lowpass_cutoff_hz}
-                onChange={(e) => commit({ ...haptics, lowpass_cutoff_hz: parseFloat(e.target.value) })}
-              />
-            </div>
+          <div className="field">
+            <div className="field-label"><span>Low-Pass Filter Cutoff</span><span className="field-val">{Math.round(haptics.lowpass_cutoff_hz)} Hz</span></div>
+            <input className="slider" type="range" min="40" max="500" step="10" value={haptics.lowpass_cutoff_hz} onChange={(e) => commit({ ...haptics, lowpass_cutoff_hz: parseFloat(e.target.value) })} />
+          </div>
 
-            <div className="slider-row">
-              <label>Left / Right Balance: L {Math.round(haptics.left_balance * 100)}% | R {Math.round(haptics.right_balance * 100)}%</label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  type="range"
-                  min="0"
-                  max="1.0"
-                  step="0.05"
-                  value={haptics.left_balance}
-                  onChange={(e) => commit({ ...haptics, left_balance: parseFloat(e.target.value) })}
-                />
-                <input
-                  type="range"
-                  min="0"
-                  max="1.0"
-                  step="0.05"
-                  value={haptics.right_balance}
-                  onChange={(e) => commit({ ...haptics, right_balance: parseFloat(e.target.value) })}
-                />
-              </div>
+          <div className="grid-2" style={{ gap: '10px' }}>
+            <div className="field">
+              <div className="field-label"><span>Left Balance</span><span className="field-val">{Math.round(haptics.left_balance * 100)}%</span></div>
+              <input className="slider" type="range" min="0" max="1.0" step="0.05" value={haptics.left_balance} onChange={(e) => commit({ ...haptics, left_balance: parseFloat(e.target.value) })} />
+            </div>
+            <div className="field">
+              <div className="field-label"><span>Right Balance</span><span className="field-val">{Math.round(haptics.right_balance * 100)}%</span></div>
+              <input className="slider" type="range" min="0" max="1.0" step="0.05" value={haptics.right_balance} onChange={(e) => commit({ ...haptics, right_balance: parseFloat(e.target.value) })} />
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '14px', flexWrap: 'wrap' }}>
-            <label style={{ fontSize: '12px' }}>Pulse: {pulseFreq} Hz</label>
-            <input
-              type="range"
-              min="40"
-              max="300"
-              step="10"
-              value={pulseFreq}
-              onChange={(e) => setPulseFreq(parseInt(e.target.value, 10))}
-              style={{ width: '120px' }}
-            />
-            <button
-              className="deck-btn primary"
-              onClick={() => onTestHdPulse(pulseFreq, 0.85, 300)}
-            >
-              ⚡ {lang === 'pt' ? 'Testar Pulso HD (0x32)' : 'Test HD Pulse (0x32)'}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', paddingTop: '10px', borderTop: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
+            <span className="field-val">{pulseFreq} Hz</span>
+            <input className="slider" style={{ flex: 1, minWidth: '100px' }} type="range" min="40" max="300" step="10" value={pulseFreq} onChange={(e) => setPulseFreq(parseInt(e.target.value, 10))} />
+            <button className="btn primary sm" onClick={() => onTestHdPulse(pulseFreq, 0.85, 300)}>
+              <Zap size={13} />
+              {lang === 'pt' ? 'Testar Pulso 0x32' : 'Test Pulse 0x32'}
             </button>
           </div>
         </div>
 
-        {/* Standard Rumble Gain & Live Telemetry */}
-        <div className="deck-card">
-          <h4>📳 {lang === 'pt' ? 'Rumble Padrão (USB & Bluetooth)' : 'Standard Rumble Feedback (USB & Bluetooth)'}</h4>
-          <p className="section-subtitle">
+        {/* Standard Rumble Gain & Actuator Meters */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div className="card-head" style={{ marginBottom: 0 }}>
+            <span className="card-title">
+              <Vibrate size={16} color="#60a5fa" />
+              {lang === 'pt' ? 'Rumble Padrão (USB & Bluetooth)' : 'Standard Rumble Feedback'}
+            </span>
+            <span className="chip">0x32 Sent: {metrics.packets_sent.toLocaleString()}</span>
+          </div>
+
+          <p className="page-subtitle" style={{ margin: 0 }}>
             {lang === 'pt'
-              ? 'Escala a intensidade de vibração recebida de jogos via ViGEmBus (XInput/DS4), Virtual DualSense e UDP.'
-              : 'Scales vibration intensity received from games via ViGEmBus (XInput/DS4), Virtual DualSense, and UDP.'}
+              ? 'Escala a intensidade de vibração vinda de jogos via ViGEmBus (XInput/DS4), Virtual DualSense e UDP.'
+              : 'Scales vibration intensity from games via ViGEmBus (XInput/DS4), Virtual DualSense, and UDP.'}
           </p>
 
-          <div className="slider-row" style={{ marginBottom: '16px' }}>
-            <label>Global Rumble Intensity: {Math.round(rumbleGain * 100)}%</label>
+          <div className="field">
+            <div className="field-label"><span>Global Rumble Intensity</span><span className="field-val">{Math.round(rumbleGain * 100)}%</span></div>
             <input
+              className="slider"
               type="range"
               min="0"
               max="2.0"
@@ -177,47 +148,29 @@ export const HapticsAudioStudio: React.FC<Props> = ({
             />
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '18px' }}>
-            <button
-              className="deck-btn secondary"
-              onClick={() => onUpdateRumble({ heavy: 200, light: 120, duration_ms: 400 })}
-            >
-              📳 Test Heavy + Light Rumble
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button className="btn" onClick={() => onUpdateRumble({ heavy: 200, light: 120, duration_ms: 400 })}>
+              <Vibrate size={14} />
+              Test Heavy + Light
             </button>
-            <button
-              className="deck-btn danger"
-              onClick={() => onUpdateRumble({ heavy: 0, light: 0 })}
-            >
-              ⏹ Stop Rumble
+            <button className="btn danger" onClick={() => onUpdateRumble({ heavy: 0, light: 0 })}>
+              <Square size={12} />
+              Stop Rumble
             </button>
           </div>
 
-          {/* Live Haptics Telemetry */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div className="gauge-group">
-              <div className="gauge-header">
-                <span>Left Actuator Level</span>
-                <span>{Math.round(metrics.left_level * 100)}%</span>
-              </div>
-              <div className="gauge-bar">
-                <div className="gauge-fill" style={{ width: `${Math.round(metrics.left_level * 100)}%` }} />
-              </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
+            <div className="field">
+              <div className="field-label"><span>Left Actuator Level</span><span className="field-val">{Math.round(metrics.left_level * 100)}%</span></div>
+              <div className="meter-track"><div className="meter-fill" style={{ width: `${Math.round(metrics.left_level * 100)}%` }} /></div>
             </div>
-            <div className="gauge-group">
-              <div className="gauge-header">
-                <span>Right Actuator Level</span>
-                <span>{Math.round(metrics.right_level * 100)}%</span>
-              </div>
-              <div className="gauge-bar">
-                <div className="gauge-fill" style={{ width: `${Math.round(metrics.right_level * 100)}%` }} />
-              </div>
+            <div className="field">
+              <div className="field-label"><span>Right Actuator Level</span><span className="field-val">{Math.round(metrics.right_level * 100)}%</span></div>
+              <div className="meter-track"><div className="meter-fill" style={{ width: `${Math.round(metrics.right_level * 100)}%` }} /></div>
             </div>
-            <span className="badge-tag" style={{ alignSelf: 'flex-start', marginTop: '6px' }}>
-              BT 0x32 Packets Sent: {metrics.packets_sent.toLocaleString()}
-            </span>
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 };

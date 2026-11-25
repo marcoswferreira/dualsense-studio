@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { Compass, Cpu, Gamepad2, ShieldCheck, Zap } from 'lucide-react';
 import { useTranslation } from '../../i18n';
-import {
-  EmulationConfig,
-  EmulationMode,
-  VirtualDualSenseDriverStatus,
-} from '../../types/models';
+import { EmulationConfig, EmulationMode, VirtualDualSenseDriverStatus } from '../../types/models';
 
 interface Props {
   emulation: EmulationConfig;
@@ -24,165 +21,131 @@ export const EmulationStudio: React.FC<Props> = ({
     setEmulation(initialEmulation);
   }, [initialEmulation]);
 
-  const setMode = (mode: EmulationMode) => {
-    const updated = { ...emulation, mode };
+  const commit = (updated: EmulationConfig) => {
     setEmulation(updated);
     onApply(updated);
   };
 
-  const toggleGyro = () => {
-    const updated = {
-      ...emulation,
-      gyro: { ...emulation.gyro, enabled: !emulation.gyro.enabled },
-    };
-    setEmulation(updated);
-    onApply(updated);
-  };
-
-  const updateGyro = (patch: Partial<EmulationConfig['gyro']>) => {
-    const updated = {
-      ...emulation,
-      gyro: { ...emulation.gyro, ...patch },
-    };
-    setEmulation(updated);
-    onApply(updated);
-  };
+  const modes: { id: EmulationMode; title: string; desc: string; icon: React.ReactNode }[] = [
+    {
+      id: 'dualsense',
+      title: t('dualsense_mode_dualsense'),
+      desc: t('dualsense_mode_dualsense_desc'),
+      icon: <Zap size={20} color="#60a5fa" />,
+    },
+    {
+      id: 'native',
+      title: t('dualsense_mode_native'),
+      desc: t('dualsense_mode_native_desc'),
+      icon: <Gamepad2 size={20} color="#94a3b8" />,
+    },
+    {
+      id: 'xbox360',
+      title: t('dualsense_mode_xbox360'),
+      desc: t('dualsense_mode_xbox360_desc'),
+      icon: <Cpu size={20} color="#4ade80" />,
+    },
+    {
+      id: 'dualshock4',
+      title: t('dualsense_mode_ds4'),
+      desc: t('dualsense_mode_ds4_desc'),
+      icon: <Cpu size={20} color="#38bdf8" />,
+    },
+  ];
 
   return (
-    <div className="emulation-studio-container">
-      <div className="studio-header">
+    <>
+      <div className="page-header">
         <div>
-          <h3>{t('dualsense_emulation_title')}</h3>
-          <p className="section-subtitle">{t('dualsense_emulation_subtitle')}</p>
+          <h2 className="page-title">{t('dualsense_emulation_title')}</h2>
+          <p className="page-subtitle">{t('dualsense_emulation_subtitle')}</p>
         </div>
       </div>
 
-      {/* Driver Health Bar */}
-      <div className="deck-card" style={{ marginBottom: '16px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* Driver Diagnostics Strip */}
+      <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px' }}>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <span className={`badge-tag ${virtualDriver.available ? 'live-badge' : ''}`}>
+          <span className={`chip ${virtualDriver.available ? 'success' : 'warn'}`}>
+            <ShieldCheck size={12} />
             Virtual DualSense ({virtualDriver.backend_name}): {virtualDriver.available ? 'READY' : 'STANDBY'}
           </span>
-          <span className={`badge-tag ${virtualDriver.vigem_installed ? 'live-badge' : ''}`}>
+          <span className={`chip ${virtualDriver.vigem_installed ? 'success' : ''}`}>
             ViGEmBus: {virtualDriver.vigem_installed ? 'INSTALLED' : 'NOT DETECTED'}
           </span>
-          <span className={`badge-tag ${virtualDriver.hidhide_installed ? 'live-badge' : ''}`}>
+          <span className={`chip ${virtualDriver.hidhide_installed ? 'success' : ''}`}>
             HidHide: {virtualDriver.hidhide_installed ? 'ACTIVE' : 'NOT INSTALLED'}
           </span>
         </div>
-        <span style={{ fontSize: '12px', color: 'var(--deck-text-muted, #9ca3af)' }}>
-          {virtualDriver.detail}
-        </span>
+        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{virtualDriver.detail}</span>
       </div>
 
-      <div className="emulation-modes-grid">
-        {/* Virtual DualSense (PS5 Native) */}
-        <div
-          className={`deck-card emulation-mode-card ${emulation.mode === 'dualsense' ? 'selected' : ''}`}
-          onClick={() => setMode('dualsense')}
-        >
-          <div className="card-top-icon">⚡</div>
-          <h4>{t('dualsense_mode_dualsense')}</h4>
-          <p>{t('dualsense_mode_dualsense_desc')}</p>
-          <span className="badge-tag">{emulation.mode === 'dualsense' ? 'ACTIVE' : 'SELECT'}</span>
-        </div>
-
-        {/* Native Mode */}
-        <div
-          className={`deck-card emulation-mode-card ${emulation.mode === 'native' ? 'selected' : ''}`}
-          onClick={() => setMode('native')}
-        >
-          <div className="card-top-icon">🎮</div>
-          <h4>{t('dualsense_mode_native')}</h4>
-          <p>{t('dualsense_mode_native_desc')}</p>
-          <span className="badge-tag">{emulation.mode === 'native' ? 'ACTIVE' : 'SELECT'}</span>
-        </div>
-
-        {/* Xbox 360 / XInput */}
-        <div
-          className={`deck-card emulation-mode-card ${emulation.mode === 'xbox360' ? 'selected' : ''}`}
-          onClick={() => setMode('xbox360')}
-        >
-          <div className="card-top-icon">🟢</div>
-          <h4>{t('dualsense_mode_xbox360')}</h4>
-          <p>{t('dualsense_mode_xbox360_desc')}</p>
-          <span className="badge-tag">{emulation.mode === 'xbox360' ? 'ACTIVE' : 'SELECT'}</span>
-        </div>
-
-        {/* DualShock 4 */}
-        <div
-          className={`deck-card emulation-mode-card ${emulation.mode === 'dualshock4' ? 'selected' : ''}`}
-          onClick={() => setMode('dualshock4')}
-        >
-          <div className="card-top-icon">🔵</div>
-          <h4>{t('dualsense_mode_ds4')}</h4>
-          <p>{t('dualsense_mode_ds4_desc')}</p>
-          <span className="badge-tag">{emulation.mode === 'dualshock4' ? 'ACTIVE' : 'SELECT'}</span>
-        </div>
+      {/* 4 Balanced Mode Cards */}
+      <div className="grid-4">
+        {modes.map((m) => {
+          const selected = emulation.mode === m.id;
+          return (
+            <div
+              key={m.id}
+              className={`card card-interactive ${selected ? 'selected' : ''}`}
+              onClick={() => commit({ ...emulation, mode: m.id })}
+              style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '12px' }}
+            >
+              <div>
+                <div style={{ marginBottom: '10px' }}>{m.icon}</div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '6px' }}>{m.title}</div>
+                <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{m.desc}</p>
+              </div>
+              <span className={`chip ${selected ? 'accent' : ''}`} style={{ alignSelf: 'flex-start' }}>
+                {selected ? 'ACTIVE' : 'SELECT'}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Gyro Aiming Station */}
-      <div className="deck-card gyro-card">
-        <div className="gyro-header">
+      {/* Gyro Aiming Card */}
+      <div className="card">
+        <div className="card-head" style={{ marginBottom: emulation.gyro.enabled ? '16px' : 0 }}>
           <div>
-            <h4>🎯 {t('dualsense_gyro_title')}</h4>
-            <p className="section-subtitle">{t('dualsense_gyro_subtitle')}</p>
+            <span className="card-title">
+              <Compass size={16} color="#22d3ee" />
+              {t('dualsense_gyro_title')}
+            </span>
+            <p className="page-subtitle">{t('dualsense_gyro_subtitle')}</p>
           </div>
           <button
-            className={`deck-btn ${emulation.gyro.enabled ? 'danger' : 'primary'}`}
-            onClick={toggleGyro}
+            className={`btn ${emulation.gyro.enabled ? 'danger' : 'primary'}`}
+            onClick={() => commit({ ...emulation, gyro: { ...emulation.gyro, enabled: !emulation.gyro.enabled } })}
           >
             {emulation.gyro.enabled ? t('dualsense_gyro_disable') : t('dualsense_gyro_enable')}
           </button>
         </div>
 
         {emulation.gyro.enabled && (
-          <div className="gyro-controls-grid">
-            <div className="form-group">
-              <label>{t('dualsense_gyro_sensitivity')}: {emulation.gyro.sensitivity.toFixed(1)}x</label>
-              <input
-                type="range"
-                min="0.5"
-                max="3.0"
-                step="0.1"
-                value={emulation.gyro.sensitivity}
-                onChange={(e) => updateGyro({ sensitivity: parseFloat(e.target.value) })}
-              />
+          <div className="grid-2" style={{ paddingTop: '14px', borderTop: '1px solid var(--border-subtle)' }}>
+            <div className="field">
+              <div className="field-label"><span>{t('dualsense_gyro_sensitivity')}</span><span className="field-val">{emulation.gyro.sensitivity.toFixed(1)}x</span></div>
+              <input className="slider" type="range" min="0.5" max="3.0" step="0.1" value={emulation.gyro.sensitivity} onChange={(e) => commit({ ...emulation, gyro: { ...emulation.gyro, sensitivity: parseFloat(e.target.value) } })} />
             </div>
 
-            <div className="form-group">
-              <label>{t('dualsense_gyro_deadzone')}: {emulation.gyro.deadzone}</label>
-              <input
-                type="range"
-                min="0"
-                max="150"
-                step="5"
-                value={emulation.gyro.deadzone}
-                onChange={(e) => updateGyro({ deadzone: parseInt(e.target.value, 10) })}
-              />
+            <div className="field">
+              <div className="field-label"><span>{t('dualsense_gyro_deadzone')}</span><span className="field-val">{emulation.gyro.deadzone}</span></div>
+              <input className="slider" type="range" min="0" max="150" step="5" value={emulation.gyro.deadzone} onChange={(e) => commit({ ...emulation, gyro: { ...emulation.gyro, deadzone: parseInt(e.target.value, 10) } })} />
             </div>
 
-            <div className="checkbox-row">
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={emulation.gyro.invert_x}
-                  onChange={(e) => updateGyro({ invert_x: e.target.checked })}
-                />
+            <div className="check-row" style={{ gridColumn: '1 / -1' }}>
+              <label className="check-label">
+                <input type="checkbox" checked={emulation.gyro.invert_x} onChange={(e) => commit({ ...emulation, gyro: { ...emulation.gyro, invert_x: e.target.checked } })} />
                 {t('dualsense_gyro_invert_x')}
               </label>
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={emulation.gyro.invert_y}
-                  onChange={(e) => updateGyro({ invert_y: e.target.checked })}
-                />
+              <label className="check-label">
+                <input type="checkbox" checked={emulation.gyro.invert_y} onChange={(e) => commit({ ...emulation, gyro: { ...emulation.gyro, invert_y: e.target.checked } })} />
                 {t('dualsense_gyro_invert_y')}
               </label>
             </div>
           </div>
         )}
       </div>
-    </div>
+    </>
   );
 };

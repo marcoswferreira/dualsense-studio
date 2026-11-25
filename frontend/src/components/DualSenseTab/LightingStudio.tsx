@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Palette, Sparkles } from 'lucide-react';
 import { useTranslation } from '../../i18n';
-import { LightingConfig, LightbarMode, PlayerLed, MicLed, RgbColor } from '../../types/models';
+import { LightingConfig, MicLed, PlayerLed, RgbColor } from '../../types/models';
 
 interface Props {
   lighting: LightingConfig;
@@ -9,103 +10,137 @@ interface Props {
 
 const COLOR_PRESETS: { label: string; color: RgbColor }[] = [
   { label: 'Sony Blue', color: { r: 0, g: 68, b: 204 } },
-  { label: 'Cyberpunk Neon', color: { r: 0, g: 255, b: 255 } },
-  { label: 'Crimson Red', color: { r: 255, g: 20, b: 40 } },
-  { label: 'Emerald Green', color: { r: 0, g: 230, b: 100 } },
+  { label: 'Cyberpunk Cyan', color: { r: 0, g: 240, b: 255 } },
+  { label: 'Crimson Red', color: { r: 255, g: 24, b: 56 } },
+  { label: 'Emerald', color: { r: 16, g: 220, b: 110 } },
   { label: 'Electric Purple', color: { r: 160, g: 32, b: 240 } },
-  { label: 'Amber Orange', color: { r: 255, g: 140, b: 0 } },
+  { label: 'Amber Gold', color: { r: 255, g: 145, b: 0 } },
   { label: 'Pure White', color: { r: 255, g: 255, b: 255 } },
   { label: 'Stealth Off', color: { r: 0, g: 0, b: 0 } },
+];
+
+const PLAYER_OPTIONS: { id: PlayerLed; label: string }[] = [
+  { id: 'off', label: 'Off' },
+  { id: 'player1', label: 'P1' },
+  { id: 'player2', label: 'P2' },
+  { id: 'player3', label: 'P3' },
+  { id: 'player4', label: 'P4' },
+  { id: 'all', label: 'All' },
+];
+
+const MIC_OPTIONS: { id: MicLed; label: string }[] = [
+  { id: 'off', label: 'Off' },
+  { id: 'solid', label: 'Solid' },
+  { id: 'pulse', label: 'Pulse' },
 ];
 
 export const LightingStudio: React.FC<Props> = ({ lighting: initialLighting, onApply }) => {
   const { t } = useTranslation();
   const [lighting, setLighting] = useState<LightingConfig>(initialLighting);
 
-  const getActiveColor = (): RgbColor => {
-    if (lighting.lightbar.mode === 'static' || lighting.lightbar.mode === 'breathing') {
-      return lighting.lightbar.color;
-    }
-    return { r: 0, g: 68, b: 204 };
-  };
+  useEffect(() => {
+    setLighting(initialLighting);
+  }, [initialLighting]);
 
-  const activeColor = getActiveColor();
-  const hexString = `#${activeColor.r.toString(16).padStart(2, '0')}${activeColor.g.toString(16).padStart(2, '0')}${activeColor.b.toString(16).padStart(2, '0')}`;
-
-  const setStaticColor = (color: RgbColor) => {
-    const updated: LightingConfig = {
-      ...lighting,
-      lightbar: { mode: 'static', color },
-    };
+  const commit = (updated: LightingConfig) => {
     setLighting(updated);
     onApply(updated);
   };
 
+  const activeColor: RgbColor =
+    lighting.lightbar.mode === 'static' || lighting.lightbar.mode === 'breathing'
+      ? lighting.lightbar.color
+      : lighting.lightbar.mode === 'off'
+        ? { r: 20, g: 25, b: 35 }
+        : { r: 59, g: 130, b: 246 };
+
+  const hexString = `#${activeColor.r.toString(16).padStart(2, '0')}${activeColor.g.toString(16).padStart(2, '0')}${activeColor.b.toString(16).padStart(2, '0')}`;
+  const animClass =
+    lighting.lightbar.mode === 'breathing'
+      ? 'anim-breathing'
+      : lighting.lightbar.mode === 'rainbow'
+        ? 'anim-rainbow'
+        : '';
+
+  const p = lighting.player_led;
+  const dots = [
+    p === 'player4' || p === 'all',
+    p === 'player2' || p === 'player3' || p === 'player4' || p === 'all',
+    p === 'player1' || p === 'player3' || p === 'all',
+    p === 'player2' || p === 'player3' || p === 'player4' || p === 'all',
+    p === 'player4' || p === 'all',
+  ];
+
   return (
-    <div className="lighting-studio-container">
-      <div className="studio-header">
+    <>
+      <div className="page-header">
         <div>
-          <h3>{t('dualsense_lighting_title')}</h3>
-          <p className="section-subtitle">{t('dualsense_lighting_subtitle')}</p>
+          <h2 className="page-title">{t('dualsense_lighting_title')}</h2>
+          <p className="page-subtitle">{t('dualsense_lighting_subtitle')}</p>
         </div>
+        <span className="chip accent">40 Hz HARDWARE SYNC</span>
       </div>
 
-      <div className="lighting-grid">
-        {/* Glow Controller Mockup */}
-        <div className="deck-card lightbar-preview-card">
-          <h4>💡 {t('dualsense_lightbar_preview')}</h4>
-          <div className="controller-silhouette">
+      <div className="grid-2">
+        {/* Live Touchpad & Lightbar Preview */}
+        <div className="card">
+          <div className="card-head">
+            <span className="card-title">
+              <Sparkles size={16} color="#60a5fa" />
+              {t('dualsense_lightbar_preview')}
+            </span>
+            <span className="chip">{lighting.lightbar.mode.toUpperCase()}</span>
+          </div>
+
+          <div className="lightbar-stage">
             <div
-              className="touchpad-glow"
+              className={`touchpad-shell ${animClass}`}
               style={{
-                boxShadow: `0 0 25px 8px rgb(${activeColor.r}, ${activeColor.g}, ${activeColor.b})`,
                 borderColor: `rgb(${activeColor.r}, ${activeColor.g}, ${activeColor.b})`,
+                boxShadow:
+                  lighting.lightbar.mode === 'off'
+                    ? 'none'
+                    : `0 0 28px 4px rgba(${activeColor.r}, ${activeColor.g}, ${activeColor.b}, 0.55), inset 0 0 18px rgba(${activeColor.r}, ${activeColor.g}, ${activeColor.b}, 0.18)`,
               }}
             >
-              <div className="touchpad-surface">
-                <span>TOUCHPAD</span>
-              </div>
+              <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', letterSpacing: '0.2em', color: 'var(--text-muted)' }}>
+                DUALSENSE TOUCHPAD
+              </span>
             </div>
-            {/* Player LED Bar */}
-            <div className="player-led-bar">
-              {['player4', 'all'].includes(lighting.player_led) && <span className="led-dot active" />}
-              {['player2', 'player3', 'player4', 'all'].includes(lighting.player_led) && <span className="led-dot active" />}
-              {['player1', 'player3', 'player4', 'all'].includes(lighting.player_led) && <span className="led-dot active" />}
-              {['player2', 'player3', 'player4', 'all'].includes(lighting.player_led) && <span className="led-dot active" />}
-              {['player4', 'all'].includes(lighting.player_led) && <span className="led-dot active" />}
+
+            <div className="player-dots" title={`Player LED: ${lighting.player_led}`}>
+              {dots.map((lit, idx) => (
+                <span key={idx} className={`player-dot ${lit ? 'lit' : ''}`} />
+              ))}
             </div>
-            {/* Mic LED */}
-            <div className={`mic-led-indicator ${lighting.mic_led !== 'off' ? 'active' : ''}`}>
-              <span>MIC</span>
-            </div>
+
+            <span className={`chip ${lighting.mic_led !== 'off' ? 'warn' : ''}`}>
+              MIC LED: {lighting.mic_led.toUpperCase()}
+            </span>
           </div>
         </div>
 
-        {/* Color Palette & Mode Controls */}
-        <div className="deck-card lighting-controls-card">
-          <h4>🎨 {t('dualsense_lighting_palette')}</h4>
+        {/* Palette & LED Controls */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className="card-head" style={{ marginBottom: 0 }}>
+            <span className="card-title">
+              <Palette size={16} color="#22d3ee" />
+              {t('dualsense_lighting_palette')}
+            </span>
+          </div>
 
-          <div className="form-group">
-            <label>{t('dualsense_lighting_mode')}</label>
+          <div className="field">
+            <span className="field-label">{t('dualsense_lighting_mode')}</span>
             <select
-              className="deck-select"
+              className="select"
               value={lighting.lightbar.mode}
               onChange={(e) => {
                 const mode = e.target.value;
-                let updated: LightingConfig = { ...lighting };
-                if (mode === 'rainbow') {
-                  updated = { ...lighting, lightbar: { mode: 'rainbow', speed: 1.0 } };
-                } else if (mode === 'battery_level') {
-                  updated = { ...lighting, lightbar: { mode: 'battery_level' } };
-                } else if (mode === 'breathing') {
-                  updated = { ...lighting, lightbar: { mode: 'breathing', color: activeColor, speed: 1.0 } };
-                } else if (mode === 'off') {
-                  updated = { ...lighting, lightbar: { mode: 'off' } };
-                } else {
-                  updated = { ...lighting, lightbar: { mode: 'static', color: activeColor } };
-                }
-                setLighting(updated);
-                onApply(updated);
+                if (mode === 'rainbow') commit({ ...lighting, lightbar: { mode: 'rainbow', speed: 1.0 } });
+                else if (mode === 'battery_level') commit({ ...lighting, lightbar: { mode: 'battery_level' } });
+                else if (mode === 'breathing') commit({ ...lighting, lightbar: { mode: 'breathing', color: activeColor, speed: 1.0 } });
+                else if (mode === 'off') commit({ ...lighting, lightbar: { mode: 'off' } });
+                else commit({ ...lighting, lightbar: { mode: 'static', color: activeColor } });
               }}
             >
               <option value="static">{t('dualsense_led_mode_static')}</option>
@@ -116,81 +151,70 @@ export const LightingStudio: React.FC<Props> = ({ lighting: initialLighting, onA
             </select>
           </div>
 
-          <div className="color-swatches-grid">
-            {COLOR_PRESETS.map((p) => (
+          <div className="swatch-grid">
+            {COLOR_PRESETS.map((preset) => (
               <button
-                key={p.label}
-                className="swatch-btn"
-                style={{ backgroundColor: `rgb(${p.color.r}, ${p.color.g}, ${p.color.b})` }}
-                onClick={() => setStaticColor(p.color)}
-                title={p.label}
+                key={preset.label}
+                className="swatch"
+                style={{ backgroundColor: `rgb(${preset.color.r}, ${preset.color.g}, ${preset.color.b})` }}
+                onClick={() => commit({ ...lighting, lightbar: { mode: 'static', color: preset.color } })}
+                title={preset.label}
               />
             ))}
           </div>
 
-          <div className="form-group hex-input-group">
-            <label>{t('dualsense_custom_hex')}</label>
-            <input
-              type="color"
-              className="color-picker-input"
-              value={hexString}
-              onChange={(e) => {
-                const hex = e.target.value.replace('#', '');
-                const r = parseInt(hex.substring(0, 2), 16);
-                const g = parseInt(hex.substring(2, 4), 16);
-                const b = parseInt(hex.substring(4, 6), 16);
-                setStaticColor({ r, g, b });
-              }}
-            />
-            <span className="hex-val-label">{hexString.toUpperCase()}</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+            <span className="field-label">{t('dualsense_custom_hex')}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <input
+                type="color"
+                value={hexString}
+                onChange={(e) => {
+                  const hex = e.target.value.replace('#', '');
+                  const color = {
+                    r: parseInt(hex.substring(0, 2), 16),
+                    g: parseInt(hex.substring(2, 4), 16),
+                    b: parseInt(hex.substring(4, 6), 16),
+                  };
+                  commit({ ...lighting, lightbar: { mode: 'static', color } });
+                }}
+                style={{ width: '38px', height: '30px', border: 'none', background: 'none', cursor: 'pointer' }}
+              />
+              <span className="chip">{hexString.toUpperCase()}</span>
+            </div>
           </div>
 
-          {/* Player LEDs & Mic Mute */}
-          <div className="form-group">
-            <label>{t('dualsense_player_leds')}</label>
-            <select
-              className="deck-select"
-              value={lighting.player_led}
-              onChange={(e) => {
-                const updated: LightingConfig = {
-                  ...lighting,
-                  player_led: e.target.value as PlayerLed,
-                };
-                setLighting(updated);
-                onApply(updated);
-              }}
-            >
-              <option value="player1">{t('dualsense_player_1')}</option>
-              <option value="player2">{t('dualsense_player_2')}</option>
-              <option value="player3">{t('dualsense_player_3')}</option>
-              <option value="player4">{t('dualsense_player_4')}</option>
-              <option value="all">{t('dualsense_player_all')}</option>
-              <option value="off">{t('dualsense_mode_off')}</option>
-            </select>
+          <div className="field">
+            <span className="field-label">{t('dualsense_player_leds')}</span>
+            <div className="segmented">
+              {PLAYER_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  className={`seg-btn ${lighting.player_led === opt.id ? 'active' : ''}`}
+                  onClick={() => commit({ ...lighting, player_led: opt.id })}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="form-group">
-            <label>{t('dualsense_mic_led')}</label>
-            <select
-              className="deck-select"
-              value={lighting.mic_led}
-              onChange={(e) => {
-                const updated: LightingConfig = {
-                  ...lighting,
-                  mic_led: e.target.value as MicLed,
-                };
-                setLighting(updated);
-                onApply(updated);
-              }}
-            >
-              <option value="off">{t('dualsense_mic_off')}</option>
-              <option value="solid">{t('dualsense_mic_solid')}</option>
-              <option value="pulse">{t('dualsense_mic_pulse')}</option>
-            </select>
+          <div className="field">
+            <span className="field-label">{t('dualsense_mic_led')}</span>
+            <div className="segmented">
+              {MIC_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  className={`seg-btn ${lighting.mic_led === opt.id ? 'active' : ''}`}
+                  onClick={() => commit({ ...lighting, mic_led: opt.id })}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 };
-

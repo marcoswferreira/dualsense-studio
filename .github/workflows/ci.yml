@@ -46,7 +46,7 @@ jobs:
         run: npm run build
 
       - name: Upload Compiled UI Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ui-dist
           path: crates/dualsense-app/ui/
@@ -178,7 +178,7 @@ jobs:
           "$hash  dualsense-studio-${{ matrix.platform }}.zip" | Out-File -Encoding ascii "dist\dualsense-studio-${{ matrix.platform }}.sha256"
 
       - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dualsense-studio-${{ matrix.platform }}
           path: |

@@ -1,20 +1,34 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useTranslation } from '../../../i18n';
+import { useTranslation } from '../../i18n';
 import {
   DualSenseStatus,
   DualTriggerConfig,
   LightingConfig,
   EmulationConfig,
-} from '../../../types/models';
+  InputMappingConfig,
+  HapticsConfig,
+  TriggerProfile,
+  GameProfileRule,
+} from '../../types/models';
 import { TriggerStudio } from './TriggerStudio';
 import { LightingStudio } from './LightingStudio';
 import { EmulationStudio } from './EmulationStudio';
+import { MappingStudio } from './MappingStudio';
+import { HapticsAudioStudio } from './HapticsAudioStudio';
 import { UdpServerStudio } from './UdpServerStudio';
 import { GameProfilesStudio } from './GameProfilesStudio';
 import { ControllerTester } from './ControllerTester';
-import { webHidController, WebHidDualSenseController } from '../../../utils/dualsenseHardware';
+import { webHidController, WebHidDualSenseController } from '../../utils/dualsenseHardware';
 
-type SubTab = 'tester' | 'triggers' | 'lighting' | 'emulation' | 'udp' | 'profiles';
+type SubTab =
+  | 'tester'
+  | 'triggers'
+  | 'lighting'
+  | 'mapping'
+  | 'emulation'
+  | 'haptics'
+  | 'udp'
+  | 'profiles';
 
 interface Props {
   onShowToast?: (message: string) => void;
@@ -70,7 +84,7 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 3000);
+    const interval = setInterval(fetchStatus, 2500);
     return () => clearInterval(interval);
   }, [fetchStatus]);
 
@@ -84,7 +98,6 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
         };
         await webHidController.sendReport(triggers, currentLighting);
       }
-
       const res = await fetch('/api/dualsense/trigger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -108,7 +121,6 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
         };
         await webHidController.sendReport(currentTriggers, lighting);
       }
-
       const res = await fetch('/api/dualsense/lightbar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -139,6 +151,74 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
     }
   };
 
+  const handleApplyMapping = async (mapping: InputMappingConfig) => {
+    try {
+      const res = await fetch('/api/dualsense/mapping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(mapping),
+      });
+      if (res.ok) {
+        onShowToast?.(t('toast_dualsense_mapping_applied'));
+        fetchStatus();
+      }
+    } catch {
+      onShowToast?.(t('toast_error'));
+    }
+  };
+
+  const handleApplyHaptics = async (haptics: HapticsConfig) => {
+    try {
+      const res = await fetch('/api/dualsense/haptics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(haptics),
+      });
+      if (res.ok) {
+        onShowToast?.(t('toast_dualsense_haptics_applied'));
+        fetchStatus();
+      }
+    } catch {
+      onShowToast?.(t('toast_error'));
+    }
+  };
+
+  const handleTestHdPulse = async (freqHz: number, amplitude: number, durationMs: number) => {
+    try {
+      const res = await fetch('/api/dualsense/haptics/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ freq_hz: freqHz, amplitude, duration_ms: durationMs }),
+      });
+      if (res.ok) {
+        onShowToast?.(t('toast_rumble_tested'));
+        fetchStatus();
+      }
+    } catch {
+      onShowToast?.(t('toast_error'));
+    }
+  };
+
+  const handleUpdateRumble = async (payload: {
+    heavy?: number;
+    light?: number;
+    gain?: number;
+    duration_ms?: number;
+  }) => {
+    try {
+      const res = await fetch('/api/dualsense/rumble', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        fetchStatus();
+      }
+    } catch {
+      onShowToast?.(t('toast_error'));
+    }
+  };
+
   const handleToggleUdp = async (enabled: boolean) => {
     try {
       const res = await fetch('/api/dualsense/udp/toggle', {
@@ -150,6 +230,21 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
         onShowToast?.(
           enabled ? t('toast_dualsense_udp_started') : t('toast_dualsense_udp_stopped')
         );
+        fetchStatus();
+      }
+    } catch {
+      onShowToast?.(t('toast_error'));
+    }
+  };
+
+  const handleToggleCemuhook = async (enabled: boolean) => {
+    try {
+      const res = await fetch('/api/dualsense/cemuhook/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (res.ok) {
         fetchStatus();
       }
     } catch {
@@ -186,6 +281,52 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
     }
   };
 
+  const handleSaveCustomProfile = async (profile: TriggerProfile) => {
+    try {
+      const res = await fetch('/api/dualsense/profiles/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile),
+      });
+      if (res.ok) {
+        onShowToast?.(t('toast_dualsense_profile_applied'));
+        fetchStatus();
+      }
+    } catch {
+      onShowToast?.(t('toast_error'));
+    }
+  };
+
+  const handleDeleteCustomProfile = async (profileId: string) => {
+    try {
+      const res = await fetch('/api/dualsense/profiles/custom', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: profileId }),
+      });
+      if (res.ok) {
+        fetchStatus();
+      }
+    } catch {
+      onShowToast?.(t('toast_error'));
+    }
+  };
+
+  const handleSaveGameRules = async (rules: GameProfileRule[]) => {
+    try {
+      const res = await fetch('/api/dualsense/game-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rules }),
+      });
+      if (res.ok) {
+        fetchStatus();
+      }
+    } catch {
+      onShowToast?.(t('toast_error'));
+    }
+  };
+
   const handleToggleExtension = async (enabled: boolean) => {
     try {
       const res = await fetch('/api/dualsense/extension/toggle', {
@@ -194,15 +335,6 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
         body: JSON.stringify({ enabled }),
       });
       if (res.ok) {
-        onShowToast?.(
-          enabled
-            ? lang === 'pt'
-              ? 'Extensão DualSense Studio ativada!'
-              : 'DualSense Studio extension enabled!'
-            : lang === 'pt'
-              ? 'Extensão DualSense Studio desativada.'
-              : 'DualSense Studio extension disabled.'
-        );
         await fetchStatus();
         onRefreshAppStatus?.();
       }
@@ -219,15 +351,6 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
         body: JSON.stringify({ autostart }),
       });
       if (res.ok) {
-        onShowToast?.(
-          autostart
-            ? lang === 'pt'
-              ? 'Inicialização automática da extensão ativada.'
-              : 'Extension autostart on launch enabled.'
-            : lang === 'pt'
-              ? 'Inicialização automática da extensão desativada.'
-              : 'Extension autostart on launch disabled.'
-        );
         await fetchStatus();
         onRefreshAppStatus?.();
       }
@@ -245,20 +368,20 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
   }
 
   const currentStatus: DualSenseStatus = status || {
-    extension_enabled: false,
+    extension_enabled: true,
     autostart_on_launch: false,
     connected: false,
     name: 'Disconnected',
-    connection_type: 'usb' as const,
+    connection_type: 'usb',
     battery: { percentage: 0, is_charging: false, is_full: false },
-    triggers: { left: { mode: 'off' as const }, right: { mode: 'off' as const } },
+    triggers: { left: { mode: 'off' }, right: { mode: 'off' } },
     lighting: {
-      lightbar: { mode: 'static' as const, color: { r: 0, g: 68, b: 204 } },
-      player_led: 'player1' as const,
-      mic_led: 'off' as const,
+      lightbar: { mode: 'static', color: { r: 0, g: 68, b: 204 } },
+      player_led: 'player1',
+      mic_led: 'off',
     },
     emulation: {
-      mode: 'native' as const,
+      mode: 'native',
       gyro: { enabled: false, sensitivity: 1.0, deadzone: 50, invert_x: false, invert_y: false },
     },
     udp_stats: {
@@ -272,6 +395,50 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
     mic_muted: false,
     audio_device_detected: false,
     speaker_volume: 80,
+    mapping: {
+      left_stick: { inner_deadzone: 0.05, outer_deadzone: 1.0, anti_deadzone: 0.0, curve: { type: 'linear' }, invert_x: false, invert_y: false },
+      right_stick: { inner_deadzone: 0.05, outer_deadzone: 1.0, anti_deadzone: 0.0, curve: { type: 'linear' }, invert_x: false, invert_y: false },
+      left_trigger: { deadzone: 0, max_threshold: 255, sensitivity: 1.0 },
+      right_trigger: { deadzone: 0, max_threshold: 255, sensitivity: 1.0 },
+      button_remaps: {},
+      touchpad: { mode: 'passthrough', sensitivity: 1.0, tap_to_click: true, two_finger_scroll: true, invert_scroll: false },
+      gyro_activation: 'always',
+      gyro_smoothing: 0.0,
+      gyro_calibration_offset: [0, 0, 0],
+    },
+    haptics: {
+      mode: 'legacy_rumble',
+      enabled: false,
+      gain: 1.0,
+      lowpass_cutoff_hz: 180,
+      left_balance: 1.0,
+      right_balance: 1.0,
+      audio_source: 'default_loopback',
+    },
+    haptics_metrics: {
+      active: false,
+      packets_sent: 0,
+      left_level: 0,
+      right_level: 0,
+      sample_rate_hz: 3000,
+    },
+    rumble_gain: 1.0,
+    cemuhook_stats: {
+      running: false,
+      port: 26760,
+      active_clients: 0,
+      packets_sent: 0,
+      packets_received: 0,
+    },
+    virtual_driver: {
+      available: false,
+      active: false,
+      backend_name: 'none',
+      vigem_installed: false,
+      hidhide_installed: false,
+      detail: 'Backend offline',
+    },
+    game_profile_rules: [],
   };
 
   const isHardwareConnected = currentStatus.connected || isWebHidConnected;
@@ -285,7 +452,7 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
 
   return (
     <div className="tab-pane-content dualsense-pane">
-      {/* DualSense Extension Management Header */}
+      {/* Standalone Service Control Header */}
       <div
         className="deck-card"
         style={{
@@ -303,110 +470,39 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
             <h3 style={{ margin: 0, fontSize: '16px', color: '#fff' }}>
-              🧩 {lang === 'pt' ? 'Extensão DualSense Studio' : 'DualSense Studio Extension'}
+              🧩 DualSense Studio Engine
             </h3>
-            <span
-              className={`badge-tag ${currentStatus.extension_enabled ? 'live-badge' : ''}`}
-              style={
-                !currentStatus.extension_enabled
-                  ? { background: 'rgba(255,255,255,0.08)', color: '#9ca3af' }
-                  : undefined
-              }
-            >
-              {currentStatus.extension_enabled
-                ? lang === 'pt'
-                  ? 'ATIVA'
-                  : 'ENABLED'
-                : lang === 'pt'
-                  ? 'DESATIVADA'
-                  : 'DISABLED'}
+            <span className={`badge-tag ${currentStatus.extension_enabled ? 'live-badge' : ''}`}>
+              {currentStatus.extension_enabled ? 'ACTIVE' : 'PAUSED'}
             </span>
           </div>
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--deck-text-muted, #9ca3af)' }}>
             {lang === 'pt'
-              ? 'Esta extensão gerencia gatilhos adaptáveis, Lightbar RGB, telemetria HID e servidor UDP.'
-              : 'This extension manages adaptive triggers, RGB Lightbar, HID telemetry, and UDP server.'}
+              ? 'Virtual DualSense, Hápticos BT 0x32, Gatilhos Adaptáveis, Lightbar 40 Hz, Remapeamento e Cemuhook.'
+              : 'Virtual DualSense, BT 0x32 HD Haptics, Adaptive Triggers, 40 Hz Lightbar, Remapping & Cemuhook.'}
           </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontSize: '13px',
-              color: '#e5e7eb',
-              cursor: 'pointer',
-              userSelect: 'none',
-            }}
-          >
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#e5e7eb', cursor: 'pointer' }}>
             <input
               type="checkbox"
               checked={currentStatus.autostart_on_launch}
               onChange={(e) => handleToggleAutostart(e.target.checked)}
-              style={{ width: '16px', height: '16px', accentColor: '#3b82f6', cursor: 'pointer' }}
+              style={{ width: '16px', height: '16px', accentColor: '#3b82f6' }}
             />
-            {lang === 'pt'
-              ? 'Iniciar automaticamente junto com a aplicação'
-              : 'Start automatically with the application'}
+            {lang === 'pt' ? 'Iniciar automaticamente' : 'Autostart on launch'}
           </label>
-
           <button
             className={`deck-btn ${currentStatus.extension_enabled ? 'danger' : 'primary'}`}
             onClick={() => handleToggleExtension(!currentStatus.extension_enabled)}
           >
-            {currentStatus.extension_enabled
-              ? lang === 'pt'
-                ? '⏻ Desativar Extensão'
-                : '⏻ Disable Extension'
-              : lang === 'pt'
-                ? '⚡ Ativar Extensão DualSense'
-                : '⚡ Enable DualSense Extension'}
+            {currentStatus.extension_enabled ? '⏻ Pause Engine' : '⚡ Start Engine'}
           </button>
         </div>
       </div>
 
-      {!currentStatus.extension_enabled ? (
-        <div
-          className="deck-card"
-          style={{
-            textAlign: 'center',
-            padding: '48px 24px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '14px',
-          }}
-        >
-          <div style={{ fontSize: '42px', opacity: 0.6 }}>🎮</div>
-          <h2 style={{ margin: 0, fontSize: '20px', color: '#fff' }}>
-            {lang === 'pt'
-              ? 'A Extensão DualSense Studio está Desligada'
-              : 'DualSense Studio Extension is Turned Off'}
-          </h2>
-          <p
-            style={{
-              margin: 0,
-              maxWidth: '540px',
-              fontSize: '14px',
-              lineHeight: 1.6,
-              color: 'var(--deck-text-muted, #9ca3af)',
-            }}
-          >
-            {lang === 'pt'
-              ? 'Por padrão, a extensão DualSense permanece desligada para não consumir recursos em segundo plano nem monitorar portas USB/Bluetooth. Clique no botão abaixo para ativá-la agora, ou marque a opção acima caso deseje que ela inicie junto com o DualSense Studio.'
-              : 'By default, the DualSense extension remains turned off so it does not consume background resources or poll USB/Bluetooth ports. Click the button below to enable it now, or check the option above if you want it to start automatically with DualSense Studio.'}
-          </p>
-          <button
-            className="deck-btn primary"
-            onClick={() => handleToggleExtension(true)}
-            style={{ marginTop: '8px', padding: '10px 24px', fontSize: '14px' }}
-          >
-            {lang === 'pt' ? '⚡ Ativar Extensão Agora' : '⚡ Enable Extension Now'}
-          </button>
-        </div>
-      ) : (
+      {currentStatus.extension_enabled && (
         <>
           {/* Controller Master Top Bar */}
           <div className="dualsense-master-bar deck-card">
@@ -417,30 +513,18 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
               <div>
                 <h2 className="master-title">{displayControllerName}</h2>
                 <div className="master-subtitle">
-                  <span
-                    className={`badge-tag ${isHardwareConnected ? 'live-badge' : ''}`}
-                    style={
-                      !isHardwareConnected
-                        ? { background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' }
-                        : undefined
-                    }
-                  >
+                  <span className={`badge-tag ${isHardwareConnected ? 'live-badge' : ''}`}>
                     {isHardwareConnected ? t('dualsense_connected') : t('dualsense_disconnected')}
                   </span>
                   {currentStatus.connected && (
                     <>
+                      <span className="badge-tag">{currentStatus.connection_type.toUpperCase()}</span>
                       <span className="badge-tag">
-                        {currentStatus.connection_type.toUpperCase()}
-                      </span>
-                      <span className="badge-tag">
-                        🔋 {currentStatus.battery.percentage}%
-                        {currentStatus.battery.is_charging ? ' ⚡' : ''}
+                        🔋 {currentStatus.battery.percentage}%{currentStatus.battery.is_charging ? ' ⚡' : ''}
                       </span>
                     </>
                   )}
-                  {!currentStatus.connected && isWebHidConnected && (
-                    <span className="badge-tag">WEBHID</span>
-                  )}
+                  <span className="badge-tag">EMU: {currentStatus.emulation.mode.toUpperCase()}</span>
                 </div>
               </div>
             </div>
@@ -450,16 +534,13 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
                 <button
                   className={`deck-btn ${isWebHidConnected ? 'primary' : 'secondary'}`}
                   onClick={isWebHidConnected ? handleDisconnectWebHid : handleConnectWebHid}
-                  title={isWebHidConnected ? t('dualsense_disconnect_webhid') : t('dualsense_connect_webhid')}
                 >
-                  {isWebHidConnected ? '⚡ WebHID [ATIVO]' : '⚡ Conectar WebHID'}
+                  {isWebHidConnected ? '⚡ WebHID [ON]' : '⚡ WebHID'}
                 </button>
               )}
               <button
                 className={`deck-btn ${currentStatus.mic_muted ? 'danger' : 'secondary'}`}
                 onClick={handleToggleMic}
-                title={t('btn_toggle_mic')}
-                disabled={!isHardwareConnected}
               >
                 {currentStatus.mic_muted ? '🎙️ MIC [MUTED]' : '🎙️ MIC [ACTIVE]'}
               </button>
@@ -476,40 +557,28 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
 
           {/* Sub-Navigation Pills */}
           <div className="dualsense-subnav">
-            <button
-              className={`subnav-pill ${activeSubTab === 'tester' ? 'active' : ''}`}
-              onClick={() => setActiveSubTab('tester')}
-            >
+            <button className={`subnav-pill ${activeSubTab === 'tester' ? 'active' : ''}`} onClick={() => setActiveSubTab('tester')}>
               🕹️ {t('dualsense_subtab_tester')}
             </button>
-            <button
-              className={`subnav-pill ${activeSubTab === 'triggers' ? 'active' : ''}`}
-              onClick={() => setActiveSubTab('triggers')}
-            >
+            <button className={`subnav-pill ${activeSubTab === 'triggers' ? 'active' : ''}`} onClick={() => setActiveSubTab('triggers')}>
               ⚡ {t('dualsense_subtab_triggers')}
             </button>
-            <button
-              className={`subnav-pill ${activeSubTab === 'lighting' ? 'active' : ''}`}
-              onClick={() => setActiveSubTab('lighting')}
-            >
+            <button className={`subnav-pill ${activeSubTab === 'lighting' ? 'active' : ''}`} onClick={() => setActiveSubTab('lighting')}>
               💡 {t('dualsense_subtab_lighting')}
             </button>
-            <button
-              className={`subnav-pill ${activeSubTab === 'emulation' ? 'active' : ''}`}
-              onClick={() => setActiveSubTab('emulation')}
-            >
+            <button className={`subnav-pill ${activeSubTab === 'mapping' ? 'active' : ''}`} onClick={() => setActiveSubTab('mapping')}>
+              🎛️ {t('dualsense_subtab_mapping')}
+            </button>
+            <button className={`subnav-pill ${activeSubTab === 'emulation' ? 'active' : ''}`} onClick={() => setActiveSubTab('emulation')}>
               🎮 {t('dualsense_subtab_emulation')}
             </button>
-            <button
-              className={`subnav-pill ${activeSubTab === 'udp' ? 'active' : ''}`}
-              onClick={() => setActiveSubTab('udp')}
-            >
+            <button className={`subnav-pill ${activeSubTab === 'haptics' ? 'active' : ''}`} onClick={() => setActiveSubTab('haptics')}>
+              🌊 {t('dualsense_subtab_haptics')}
+            </button>
+            <button className={`subnav-pill ${activeSubTab === 'udp' ? 'active' : ''}`} onClick={() => setActiveSubTab('udp')}>
               📡 {t('dualsense_subtab_udp')}
             </button>
-            <button
-              className={`subnav-pill ${activeSubTab === 'profiles' ? 'active' : ''}`}
-              onClick={() => setActiveSubTab('profiles')}
-            >
+            <button className={`subnav-pill ${activeSubTab === 'profiles' ? 'active' : ''}`} onClick={() => setActiveSubTab('profiles')}>
               📁 {t('dualsense_subtab_profiles')}
             </button>
           </div>
@@ -524,33 +593,50 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
               />
             )}
             {activeSubTab === 'triggers' && (
-              <TriggerStudio
-                triggers={currentStatus.triggers}
-                onApply={handleApplyTriggers}
-              />
+              <TriggerStudio triggers={currentStatus.triggers} onApply={handleApplyTriggers} />
             )}
             {activeSubTab === 'lighting' && (
-              <LightingStudio
-                lighting={currentStatus.lighting}
-                onApply={handleApplyLighting}
+              <LightingStudio lighting={currentStatus.lighting} onApply={handleApplyLighting} />
+            )}
+            {activeSubTab === 'mapping' && (
+              <MappingStudio
+                mapping={currentStatus.mapping}
+                cemuhookStats={currentStatus.cemuhook_stats}
+                onApplyMapping={handleApplyMapping}
+                onToggleCemuhook={handleToggleCemuhook}
               />
             )}
             {activeSubTab === 'emulation' && (
               <EmulationStudio
                 emulation={currentStatus.emulation}
+                virtualDriver={currentStatus.virtual_driver}
                 onApply={handleApplyEmulation}
               />
             )}
-            {activeSubTab === 'udp' && (
-              <UdpServerStudio
-                stats={currentStatus.udp_stats}
-                onToggle={handleToggleUdp}
+            {activeSubTab === 'haptics' && (
+              <HapticsAudioStudio
+                haptics={currentStatus.haptics}
+                metrics={currentStatus.haptics_metrics}
+                rumbleGain={currentStatus.rumble_gain}
+                connectionType={currentStatus.connection_type}
+                onApplyHaptics={handleApplyHaptics}
+                onTestHdPulse={handleTestHdPulse}
+                onUpdateRumble={handleUpdateRumble}
               />
+            )}
+            {activeSubTab === 'udp' && (
+              <UdpServerStudio stats={currentStatus.udp_stats} onToggle={handleToggleUdp} />
             )}
             {activeSubTab === 'profiles' && (
               <GameProfilesStudio
                 profiles={currentStatus.profiles}
+                currentTriggers={currentStatus.triggers}
+                currentLighting={currentStatus.lighting}
+                gameRules={currentStatus.game_profile_rules}
                 onApplyProfile={handleApplyProfile}
+                onSaveCustomProfile={handleSaveCustomProfile}
+                onDeleteCustomProfile={handleDeleteCustomProfile}
+                onSaveGameRules={handleSaveGameRules}
               />
             )}
           </div>
@@ -559,4 +645,3 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast, onRefreshAppStatus 
     </div>
   );
 };
-

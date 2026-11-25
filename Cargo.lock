@@ -155,7 +155,6 @@ dependencies = [
 name = "dualsense-core"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "byteorder",
  "chrono",
  "crc32fast",
@@ -165,10 +164,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]

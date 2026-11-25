@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useTranslation } from '../../../i18n';
-import { LightingConfig, LightbarMode, PlayerLed, MicLed, RgbColor } from '../../../types/models';
+import { useTranslation } from '../../i18n';
+import { LightingConfig, LightbarMode, PlayerLed, MicLed, RgbColor } from '../../types/models';
 
 interface Props {
   lighting: LightingConfig;

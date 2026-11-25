@@ -6,7 +6,7 @@ import path from 'path';
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: path.resolve(__dirname, '../crates/launcher-app/ui'),
+    outDir: path.resolve(__dirname, '../crates/dualsense-app/ui'),
     emptyOutDir: false,
     rollupOptions: {
       output: {

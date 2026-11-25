@@ -1,5 +1,10 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use crate::emulation::{EmulationMode, GyroSettings};
+use crate::lightbar::RgbColor;
 use crate::protocol::DualSenseInputState;
+use crate::virtual_device::VirtualFeedbackEvent;
 #[allow(unused_imports)]
 use tracing::{debug, info, warn};
 
@@ -7,12 +12,102 @@ use tracing::{debug, info, warn};
 // CTL_CODE(FILE_DEVICE_BUS_EXTENDER(0x2A), Function, METHOD_BUFFERED(0), FILE_WRITE_DATA(2))
 pub const IOCTL_VIGEM_PLUGIN_TARGET: u32 = 0x2AA004;
 pub const IOCTL_VIGEM_UNPLUG_TARGET: u32 = 0x2AA008;
+pub const IOCTL_XUSB_REQUEST_NOTIFICATION: u32 = 0x2AA804;
 pub const IOCTL_XUSB_SUBMIT_REPORT: u32 = 0x2AA808;
 pub const IOCTL_DS4_SUBMIT_REPORT: u32 = 0x2AA80C;
+pub const IOCTL_DS4_REQUEST_NOTIFICATION: u32 = 0x2AA810;
 
 pub const VIGEM_TARGET_XBOX360_WIRED: u32 = 0;
 pub const VIGEM_TARGET_DUALSHOCK4_WIRED: u32 = 2;
 pub const DEFAULT_VIGEM_SERIAL: u32 = 1;
+
+/// Callback invoked asynchronously whenever ViGEmBus delivers game rumble or DS4 lightbar feedback
+pub type VirtualFeedbackCallback = Arc<dyn Fn(VirtualFeedbackEvent) + Send + Sync>;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct XusbRequestNotification {
+    pub size: u32,
+    pub serial_no: u32,
+    pub large_motor: u8,
+    pub small_motor: u8,
+    pub led_number: u8,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Ds4RequestNotification {
+    pub size: u32,
+    pub serial_no: u32,
+    pub large_motor: u8,
+    pub small_motor: u8,
+    pub lightbar_red: u8,
+    pub lightbar_green: u8,
+    pub lightbar_blue: u8,
+    pub flash_on: u8,
+    pub flash_off: u8,
+}
+
+/// Scales raw motor intensity (0..=255) by a user-configured rumble gain (0.0..=2.0)
+pub fn apply_rumble_gain(raw: u8, gain: f32) -> u8 {
+    let clamped_gain = gain.clamp(0.0, 2.0);
+    ((raw as f32) * clamped_gain).round().clamp(0.0, 255.0) as u8
+}
+
+/// Converts a ViGEmBus XInput notification struct into a `VirtualFeedbackEvent`
+pub fn parse_xusb_notification(notif: &XusbRequestNotification) -> VirtualFeedbackEvent {
+    VirtualFeedbackEvent {
+        heavy_rumble: Some(notif.large_motor),
+        light_rumble: Some(notif.small_motor),
+        ..Default::default()
+    }
+}
+
+/// Converts a ViGEmBus DS4 notification struct into a `VirtualFeedbackEvent`
+pub fn parse_ds4_notification(notif: &Ds4RequestNotification) -> VirtualFeedbackEvent {
+    VirtualFeedbackEvent {
+        heavy_rumble: Some(notif.large_motor),
+        light_rumble: Some(notif.small_motor),
+        lightbar: Some(RgbColor::new(
+            notif.lightbar_red,
+            notif.lightbar_green,
+            notif.lightbar_blue,
+        )),
+        ..Default::default()
+    }
+}
+
+/// Checks if Nefarius HidHide filter driver is installed on Windows (prevents double-input)
+pub fn is_hidhide_driver_installed() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        unsafe {
+            let wide: Vec<u16> = r"\\.\HidHide"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let h = CreateFileW(
+                wide.as_ptr(),
+                0x80000000, // GENERIC_READ
+                0x00000003, // FILE_SHARE_READ | FILE_SHARE_WRITE
+                std::ptr::null(),
+                3,          // OPEN_EXISTING
+                0x00000080, // FILE_ATTRIBUTE_NORMAL
+                0,
+            );
+            if h != -1 && h != 0 {
+                CloseHandle(h);
+                true
+            } else {
+                false
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -77,6 +172,8 @@ pub struct VirtualGamepadBus {
     handle: isize,
     active_mode: EmulationMode,
     is_plugged: bool,
+    feedback_callback: Option<VirtualFeedbackCallback>,
+    notif_running: Arc<AtomicBool>,
 }
 
 impl Default for VirtualGamepadBus {
@@ -92,7 +189,13 @@ impl VirtualGamepadBus {
             handle: -1,
             active_mode: EmulationMode::Native,
             is_plugged: false,
+            feedback_callback: None,
+            notif_running: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn set_feedback_callback(&mut self, cb: VirtualFeedbackCallback) {
+        self.feedback_callback = Some(cb);
     }
 
     /// Checks if ViGEmBus kernel driver is installed on this system
@@ -115,7 +218,7 @@ impl VirtualGamepadBus {
         }
     }
 
-    /// Sets controller emulation mode (Native, Xbox 360, or DualShock 4)
+    /// Sets controller emulation mode (Native, Xbox 360, DualShock 4, or Virtual DualSense)
     pub fn set_mode(&mut self, mode: EmulationMode) -> bool {
         if self.active_mode == mode && self.is_plugged {
             return true;
@@ -124,7 +227,7 @@ impl VirtualGamepadBus {
         self.unplug();
         self.active_mode = mode;
 
-        if mode == EmulationMode::Native {
+        if mode == EmulationMode::Native || mode == EmulationMode::DualSense {
             return true;
         }
 
@@ -146,7 +249,7 @@ impl VirtualGamepadBus {
                 let target_type = match mode {
                     EmulationMode::Xbox360 => VIGEM_TARGET_XBOX360_WIRED,
                     EmulationMode::DualShock4 => VIGEM_TARGET_DUALSHOCK4_WIRED,
-                    EmulationMode::Native => return true,
+                    EmulationMode::Native | EmulationMode::DualSense => return true,
                 };
 
                 let mut plugin = ViGEmPluginTarget {
@@ -174,6 +277,7 @@ impl VirtualGamepadBus {
                         "ViGEmBus: Successfully plugged virtual {:?} controller (serial={})",
                         mode, DEFAULT_VIGEM_SERIAL
                     );
+                    self.spawn_notification_reader(mode);
                     true
                 } else {
                     warn!("ViGEmBus: Failed to plug virtual {:?} controller", mode);
@@ -192,11 +296,84 @@ impl VirtualGamepadBus {
         }
     }
 
+    #[cfg(target_os = "windows")]
+    fn spawn_notification_reader(&mut self, mode: EmulationMode) {
+        let Some(cb) = self.feedback_callback.clone() else {
+            return;
+        };
+        let handle = self.handle;
+        if handle <= 0 {
+            return;
+        }
+
+        self.notif_running.store(true, Ordering::SeqCst);
+        let running = self.notif_running.clone();
+
+        let _ = std::thread::Builder::new()
+            .name("vigem-feedback-reader".to_string())
+            .spawn(move || {
+                while running.load(Ordering::SeqCst) {
+                    unsafe {
+                        let mut bytes_ret = 0u32;
+                        match mode {
+                            EmulationMode::Xbox360 => {
+                                let mut notif = XusbRequestNotification {
+                                    size: std::mem::size_of::<XusbRequestNotification>() as u32,
+                                    serial_no: DEFAULT_VIGEM_SERIAL,
+                                    ..Default::default()
+                                };
+                                let ok = device_io_control(
+                                    handle,
+                                    IOCTL_XUSB_REQUEST_NOTIFICATION,
+                                    &mut notif as *mut _ as *mut _,
+                                    std::mem::size_of::<XusbRequestNotification>() as u32,
+                                    &mut notif as *mut _ as *mut _,
+                                    std::mem::size_of::<XusbRequestNotification>() as u32,
+                                    &mut bytes_ret,
+                                );
+                                if ok == 0 || !running.load(Ordering::SeqCst) {
+                                    break;
+                                }
+                                cb(parse_xusb_notification(&notif));
+                            }
+                            EmulationMode::DualShock4 => {
+                                let mut notif = Ds4RequestNotification {
+                                    size: std::mem::size_of::<Ds4RequestNotification>() as u32,
+                                    serial_no: DEFAULT_VIGEM_SERIAL,
+                                    ..Default::default()
+                                };
+                                let ok = device_io_control(
+                                    handle,
+                                    IOCTL_DS4_REQUEST_NOTIFICATION,
+                                    &mut notif as *mut _ as *mut _,
+                                    std::mem::size_of::<Ds4RequestNotification>() as u32,
+                                    &mut notif as *mut _ as *mut _,
+                                    std::mem::size_of::<Ds4RequestNotification>() as u32,
+                                    &mut bytes_ret,
+                                );
+                                if ok == 0 || !running.load(Ordering::SeqCst) {
+                                    break;
+                                }
+                                cb(parse_ds4_notification(&notif));
+                            }
+                            EmulationMode::Native | EmulationMode::DualSense => break,
+                        }
+                    }
+                }
+            });
+    }
+
     /// Dispatches physical input report into the emulated virtual gamepad
     pub fn submit_input(&mut self, _input: &DualSenseInputState, _gyro: &GyroSettings) {
         #[cfg(target_os = "windows")]
         {
-            if !self.is_plugged || self.active_mode == EmulationMode::Native || self.handle <= 0 {
+            if !self.is_plugged
+                || matches!(
+                    self.active_mode,
+                    EmulationMode::Native | EmulationMode::DualSense
+                )
+                || self.handle <= 0
+            {
                 return;
             }
 
@@ -238,14 +415,22 @@ impl VirtualGamepadBus {
                             &mut bytes_ret,
                         );
                     }
-                    EmulationMode::Native => {}
+                    EmulationMode::Native | EmulationMode::DualSense => {}
                 }
             }
         }
     }
 
-    /// Unplugs the virtual controller and closes the driver handle
+    /// Unplugs the virtual controller, resets rumble to zero (anti-stuck guard), and closes handle
     pub fn unplug(&mut self) {
+        self.notif_running.store(false, Ordering::SeqCst);
+        if let Some(cb) = self.feedback_callback.as_ref() {
+            cb(VirtualFeedbackEvent {
+                heavy_rumble: Some(0),
+                light_rumble: Some(0),
+                ..Default::default()
+            });
+        }
         if self.is_plugged {
             #[cfg(target_os = "windows")]
             unsafe {

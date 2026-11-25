@@ -1,15 +1,28 @@
-import React, { useState } from 'react';
-import { useTranslation } from '../../../i18n';
-import { EmulationConfig, EmulationMode } from '../../../types/models';
+import React, { useState, useEffect } from 'react';
+import { useTranslation } from '../../i18n';
+import {
+  EmulationConfig,
+  EmulationMode,
+  VirtualDualSenseDriverStatus,
+} from '../../types/models';
 
 interface Props {
   emulation: EmulationConfig;
+  virtualDriver: VirtualDualSenseDriverStatus;
   onApply: (config: EmulationConfig) => void;
 }
 
-export const EmulationStudio: React.FC<Props> = ({ emulation: initialEmulation, onApply }) => {
+export const EmulationStudio: React.FC<Props> = ({
+  emulation: initialEmulation,
+  virtualDriver,
+  onApply,
+}) => {
   const { t } = useTranslation();
   const [emulation, setEmulation] = useState<EmulationConfig>(initialEmulation);
+
+  useEffect(() => {
+    setEmulation(initialEmulation);
+  }, [initialEmulation]);
 
   const setMode = (mode: EmulationMode) => {
     const updated = { ...emulation, mode };
@@ -44,7 +57,36 @@ export const EmulationStudio: React.FC<Props> = ({ emulation: initialEmulation, 
         </div>
       </div>
 
+      {/* Driver Health Bar */}
+      <div className="deck-card" style={{ marginBottom: '16px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span className={`badge-tag ${virtualDriver.available ? 'live-badge' : ''}`}>
+            Virtual DualSense ({virtualDriver.backend_name}): {virtualDriver.available ? 'READY' : 'STANDBY'}
+          </span>
+          <span className={`badge-tag ${virtualDriver.vigem_installed ? 'live-badge' : ''}`}>
+            ViGEmBus: {virtualDriver.vigem_installed ? 'INSTALLED' : 'NOT DETECTED'}
+          </span>
+          <span className={`badge-tag ${virtualDriver.hidhide_installed ? 'live-badge' : ''}`}>
+            HidHide: {virtualDriver.hidhide_installed ? 'ACTIVE' : 'NOT INSTALLED'}
+          </span>
+        </div>
+        <span style={{ fontSize: '12px', color: 'var(--deck-text-muted, #9ca3af)' }}>
+          {virtualDriver.detail}
+        </span>
+      </div>
+
       <div className="emulation-modes-grid">
+        {/* Virtual DualSense (PS5 Native) */}
+        <div
+          className={`deck-card emulation-mode-card ${emulation.mode === 'dualsense' ? 'selected' : ''}`}
+          onClick={() => setMode('dualsense')}
+        >
+          <div className="card-top-icon">⚡</div>
+          <h4>{t('dualsense_mode_dualsense')}</h4>
+          <p>{t('dualsense_mode_dualsense_desc')}</p>
+          <span className="badge-tag">{emulation.mode === 'dualsense' ? 'ACTIVE' : 'SELECT'}</span>
+        </div>
+
         {/* Native Mode */}
         <div
           className={`deck-card emulation-mode-card ${emulation.mode === 'native' ? 'selected' : ''}`}
@@ -144,4 +186,3 @@ export const EmulationStudio: React.FC<Props> = ({ emulation: initialEmulation, 
     </div>
   );
 };
-

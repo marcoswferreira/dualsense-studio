@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useTranslation } from '../../../i18n';
+import { useTranslation } from '../../i18n';
 import {
   pollStandardGamepad,
   triggerHapticRumble,
   webHidController,
   LiveGamepadState,
   WebHidDualSenseController,
-} from '../../../utils/dualsenseHardware';
+} from '../../utils/dualsenseHardware';
 
 interface Props {
   onShowToast?: (message: string) => void;

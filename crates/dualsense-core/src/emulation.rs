@@ -11,6 +11,8 @@ pub enum EmulationMode {
     Xbox360,
     /// Emulate DualShock 4 controller
     DualShock4,
+    /// Emulate a Virtual DualSense (PS5) controller with bidirectional triggers/LEDs/rumble
+    DualSense,
 }
 
 /// Gyro Aiming and Motion Mapping Settings

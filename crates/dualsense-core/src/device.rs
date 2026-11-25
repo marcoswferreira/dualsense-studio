@@ -175,10 +175,13 @@ impl HidDeviceWorker {
                     }
 
                     let mut in_buf = [0u8; 128];
+                    let worker_start = std::time::Instant::now();
                     let mut last_send = std::time::Instant::now();
+                    let mut last_haptic_send = std::time::Instant::now();
                     let mut last_input_time = std::time::Instant::now();
                     let mut is_currently_connected = false;
                     let mut bt_seq: u8 = 0;
+                    let mut haptic_pkt_counter: u8 = 0;
                     let mut logged_first_input = false;
                     let mut last_logged_state: Option<String> = None;
                     let mut write_error_count: u32 = 0;
@@ -259,12 +262,37 @@ impl HidDeviceWorker {
                             }
                         }
 
-                        // Send Output Report (Adaptive Triggers, Lightbar, Player LEDs) periodically (40Hz)
+                        // Drain bidirectional feedback from Virtual DualSense (triggers, LEDs, rumble)
+                        manager.poll_virtual_feedback();
+
+                        // Stream Bluetooth HD Haptics (Report 0x32) at ~94 Hz (~10.6 ms) when queued
+                        if is_ds
+                            && connection == ConnectionType::Bluetooth
+                            && manager.is_bt_hd_haptics_active()
+                            && last_haptic_send.elapsed() >= Duration::from_millis(10)
+                        {
+                            if let Some(block) = manager.pop_next_haptic_block() {
+                                last_haptic_send = std::time::Instant::now();
+                                let pkt = crate::protocol::build_bluetooth_haptics_0x32(
+                                    bt_seq,
+                                    haptic_pkt_counter,
+                                    &block,
+                                );
+                                bt_seq = (bt_seq + 1) & 0x0F;
+                                haptic_pkt_counter = haptic_pkt_counter.wrapping_add(1);
+                                if device.write(&pkt).is_ok() {
+                                    manager.record_haptic_packet_sent();
+                                }
+                            }
+                        }
+
+                        // Send Output Report (Adaptive Triggers, Animated Lightbar, Player LEDs) at 40Hz
                         if is_ds && last_send.elapsed() >= Duration::from_millis(25) {
                             last_send = std::time::Instant::now();
                             let current_seq = bt_seq;
+                            let elapsed_secs = worker_start.elapsed().as_secs_f32();
                             let builder = manager
-                                .build_current_output_report()
+                                .build_output_report_at(elapsed_secs)
                                 .with_seq(current_seq);
 
                             let report = match connection {

@@ -1,14 +1,29 @@
-use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::emulation::EmulationConfig;
-use crate::lightbar::LightingConfig;
+use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
+
+use crate::cemuhook::{CemuhookStats, CemuhookUdpServer, DEFAULT_CEMUHOOK_UDP_PORT};
+use crate::emulation::{EmulationConfig, EmulationMode};
+use crate::haptics_audio::{
+    generate_test_haptic_blocks, HapticsConfig, HapticsFrameQueue, HapticsMetrics, HapticsMode,
+    BT_HAPTICS_BYTES_PER_PACKET, BT_HAPTICS_SAMPLE_RATE_HZ,
+};
+use crate::lightbar::{LightbarMode, LightingConfig, MicLed};
+use crate::mapping::{apply_input_mapping, InputMappingConfig};
 use crate::profiles::TriggerProfile;
 use crate::protocol::{BatteryState, ConnectionType, DualSenseInputState, OutputReportBuilder};
+use crate::storage::{AppConfig, GameProfileRule};
 use crate::triggers::DualTriggerConfig;
 use crate::udp_server::{
     DualSenseUdpServer, SharedControllerState, UdpServerStats, DEFAULT_DUALSENSEX_UDP_PORT,
+};
+use crate::uhid_dualsense::{is_uhid_available, UhidDualSenseBackend};
+use crate::usbip_dualsense::{is_usbip_client_installed, UsbipVirtualDualSenseServer};
+use crate::vigem::{apply_rumble_gain, is_hidhide_driver_installed, VirtualGamepadBus};
+use crate::virtual_device::{
+    VirtualControllerBackend, VirtualDualSenseDriverStatus, VirtualFeedbackEvent,
 };
 
 /// Comprehensive controller status report for UI and API clients
@@ -28,6 +43,24 @@ pub struct DualSenseStatus {
     pub mic_muted: bool,
     pub audio_device_detected: bool,
     pub speaker_volume: u8,
+    #[serde(default)]
+    pub mapping: InputMappingConfig,
+    #[serde(default)]
+    pub haptics: HapticsConfig,
+    #[serde(default)]
+    pub haptics_metrics: HapticsMetrics,
+    #[serde(default = "default_rumble_gain")]
+    pub rumble_gain: f32,
+    #[serde(default)]
+    pub cemuhook_stats: CemuhookStats,
+    #[serde(default)]
+    pub virtual_driver: VirtualDualSenseDriverStatus,
+    #[serde(default)]
+    pub game_profile_rules: Vec<GameProfileRule>,
+}
+
+fn default_rumble_gain() -> f32 {
+    1.0
 }
 
 /// Callback type for physical microphone mute toggle events
@@ -39,27 +72,64 @@ pub struct DualSenseManager {
     shared_state: Arc<SharedControllerState>,
     lighting: RwLock<LightingConfig>,
     emulation: RwLock<EmulationConfig>,
+    mapping: RwLock<InputMappingConfig>,
+    haptics: RwLock<HapticsConfig>,
+    haptics_queue: Arc<HapticsFrameQueue>,
+    haptics_packets_sent: AtomicU64,
+    haptics_levels: RwLock<(f32, f32)>,
+    rumble_gain: Arc<RwLock<f32>>,
     input_state: RwLock<DualSenseInputState>,
     connected: RwLock<bool>,
     controller_name: RwLock<String>,
     udp_server: tokio::sync::Mutex<DualSenseUdpServer>,
+    cemuhook_server: tokio::sync::Mutex<CemuhookUdpServer>,
+    cemuhook_port: u16,
     profiles: RwLock<Vec<TriggerProfile>>,
+    custom_profiles: RwLock<Vec<TriggerProfile>>,
+    game_profile_rules: RwLock<Vec<GameProfileRule>>,
     mic_muted: RwLock<bool>,
     prev_mic_btn: RwLock<bool>,
     audio_device_detected: RwLock<bool>,
     speaker_volume: RwLock<u8>,
     mic_toggle_callback: RwLock<Option<MicToggleHandler>>,
-    virtual_bus: parking_lot::Mutex<crate::vigem::VirtualGamepadBus>,
+    virtual_bus: parking_lot::Mutex<VirtualGamepadBus>,
+    virtual_dualsense: parking_lot::Mutex<Box<dyn VirtualControllerBackend>>,
+    usbip_server: tokio::sync::Mutex<UsbipVirtualDualSenseServer>,
+    usbip_running_flag: RwLock<bool>,
 }
 
 impl DualSenseManager {
     pub fn new() -> Self {
-        Self::with_udp_port(DEFAULT_DUALSENSEX_UDP_PORT)
+        Self::with_ports(DEFAULT_DUALSENSEX_UDP_PORT, DEFAULT_CEMUHOOK_UDP_PORT)
     }
 
     pub fn with_udp_port(port: u16) -> Self {
+        Self::with_ports(port, DEFAULT_CEMUHOOK_UDP_PORT)
+    }
+
+    pub fn with_ports(udp_port: u16, cemuhook_port: u16) -> Self {
         let shared_state = Arc::new(SharedControllerState::default());
-        let udp_server = DualSenseUdpServer::new(port, shared_state.clone());
+        let udp_server = DualSenseUdpServer::new(udp_port, shared_state.clone());
+        let cemuhook_server = CemuhookUdpServer::new(cemuhook_port);
+        let rumble_gain = Arc::new(RwLock::new(1.0f32));
+
+        let mut virtual_bus = VirtualGamepadBus::new();
+        {
+            let shared_fb = shared_state.clone();
+            let gain_fb = rumble_gain.clone();
+            virtual_bus.set_feedback_callback(Arc::new(move |ev: VirtualFeedbackEvent| {
+                let gain = *gain_fb.read();
+                if let Some(heavy) = ev.heavy_rumble {
+                    *shared_fb.heavy_rumble.write() = apply_rumble_gain(heavy, gain);
+                }
+                if let Some(light) = ev.light_rumble {
+                    *shared_fb.light_rumble.write() = apply_rumble_gain(light, gain);
+                }
+                if let Some(rgb) = ev.lightbar {
+                    *shared_fb.lightbar.write() = rgb;
+                }
+            }));
+        }
 
         let initial_input = DualSenseInputState {
             connection: ConnectionType::Usb,
@@ -77,18 +147,40 @@ impl DualSenseManager {
             shared_state,
             lighting: RwLock::new(LightingConfig::default()),
             emulation: RwLock::new(EmulationConfig::default()),
+            mapping: RwLock::new(InputMappingConfig::default()),
+            haptics: RwLock::new(HapticsConfig::default()),
+            haptics_queue: Arc::new(HapticsFrameQueue::default()),
+            haptics_packets_sent: AtomicU64::new(0),
+            haptics_levels: RwLock::new((0.0, 0.0)),
+            rumble_gain,
             input_state: RwLock::new(initial_input),
             connected: RwLock::new(false),
             controller_name: RwLock::new("Disconnected".to_string()),
             udp_server: tokio::sync::Mutex::new(udp_server),
+            cemuhook_server: tokio::sync::Mutex::new(cemuhook_server),
+            cemuhook_port,
             profiles: RwLock::new(TriggerProfile::default_profiles()),
+            custom_profiles: RwLock::new(Vec::new()),
+            game_profile_rules: RwLock::new(Vec::new()),
             mic_muted: RwLock::new(false),
             prev_mic_btn: RwLock::new(false),
             audio_device_detected: RwLock::new(false),
             speaker_volume: RwLock::new(80),
             mic_toggle_callback: RwLock::new(None),
-            virtual_bus: parking_lot::Mutex::new(crate::vigem::VirtualGamepadBus::new()),
+            virtual_bus: parking_lot::Mutex::new(virtual_bus),
+            virtual_dualsense: parking_lot::Mutex::new(Box::new(UhidDualSenseBackend::new())),
+            usbip_server: tokio::sync::Mutex::new(UsbipVirtualDualSenseServer::new(
+                "127.0.0.1:3240",
+            )),
+            usbip_running_flag: RwLock::new(false),
         }
+    }
+
+    /// Replaces the pluggable Virtual DualSense backend (for custom drivers or E2E mock testing)
+    pub fn set_virtual_dualsense_backend(&self, backend: Box<dyn VirtualControllerBackend>) {
+        let mut guard = self.virtual_dualsense.lock();
+        guard.unplug();
+        *guard = backend;
     }
 
     pub fn is_extension_enabled(&self) -> bool {
@@ -100,6 +192,7 @@ impl DualSenseManager {
         if !enabled {
             self.set_connected(false, "Disconnected");
             self.virtual_bus.lock().unplug();
+            self.virtual_dualsense.lock().unplug();
         }
         tracing::info!("DualSense extension enabled state set to: {}", enabled);
     }
@@ -123,9 +216,88 @@ impl DualSenseManager {
         server.stop();
     }
 
+    pub async fn start_cemuhook(&self) -> Result<(), std::io::Error> {
+        let mut server = self.cemuhook_server.lock().await;
+        server.start().await
+    }
+
+    pub async fn stop_cemuhook(&self) {
+        let mut server = self.cemuhook_server.lock().await;
+        server.stop();
+    }
+
+    pub async fn start_usbip_virtual_dualsense(
+        &self,
+    ) -> Result<std::net::SocketAddr, std::io::Error> {
+        let mut server = self.usbip_server.lock().await;
+        let addr = server.start().await?;
+        *self.usbip_running_flag.write() = true;
+        Ok(addr)
+    }
+
+    pub async fn stop_usbip_virtual_dualsense(&self) {
+        let mut server = self.usbip_server.lock().await;
+        server.stop();
+        *self.usbip_running_flag.write() = false;
+    }
+
+    pub fn get_virtual_driver_status(&self) -> VirtualDualSenseDriverStatus {
+        let emu_mode = self.emulation.read().mode;
+        let vds = self.virtual_dualsense.lock();
+        let usbip_running = *self.usbip_running_flag.read();
+        let uhid_ok = is_uhid_available();
+        let usbip_ok = is_usbip_client_installed();
+        let vigem_ok = VirtualGamepadBus::is_vigem_driver_installed();
+        let hidhide_ok = is_hidhide_driver_installed();
+
+        let (available, backend_name, detail) = if vds.is_available() {
+            (
+                true,
+                vds.backend_name().to_string(),
+                format!("Virtual DualSense ready via {}", vds.backend_name()),
+            )
+        } else if cfg!(target_os = "windows") {
+            (
+                usbip_ok || usbip_running,
+                "windows_usbip_dualsense".to_string(),
+                if usbip_ok {
+                    "USB/IP Virtual DualSense ready (usbip-win2 detected)".to_string()
+                } else {
+                    "Install usbip-win2 for native Virtual DualSense, or use ViGEmBus (X360/DS4)"
+                        .to_string()
+                },
+            )
+        } else if uhid_ok {
+            (
+                true,
+                "linux_uhid_dualsense".to_string(),
+                "Linux /dev/uhid Virtual DualSense ready".to_string(),
+            )
+        } else {
+            (
+                false,
+                "none".to_string(),
+                "No Virtual DualSense kernel driver detected".to_string(),
+            )
+        };
+
+        VirtualDualSenseDriverStatus {
+            available,
+            active: emu_mode == EmulationMode::DualSense && (available || usbip_running),
+            backend_name,
+            vigem_installed: vigem_ok,
+            hidhide_installed: hidhide_ok,
+            detail,
+        }
+    }
+
     pub async fn get_status(&self) -> DualSenseStatus {
         let udp_stats = {
             let server = self.udp_server.lock().await;
+            server.stats()
+        };
+        let cemuhook_stats = {
+            let server = self.cemuhook_server.lock().await;
             server.stats()
         };
 
@@ -133,6 +305,21 @@ impl DualSenseManager {
         let triggers = self.shared_state.triggers.read().clone();
         let lighting = self.lighting.read().clone();
         let emulation = self.emulation.read().clone();
+        let mapping = self.mapping.read().clone();
+        let haptics = self.haptics.read().clone();
+        let (lvl_l, lvl_r) = *self.haptics_levels.read();
+        let haptics_metrics = HapticsMetrics {
+            active: haptics.enabled
+                && matches!(
+                    haptics.mode,
+                    HapticsMode::BluetoothHdHaptics | HapticsMode::AudioToHaptics
+                ),
+            packets_sent: self.haptics_packets_sent.load(Ordering::Relaxed),
+            left_level: lvl_l,
+            right_level: lvl_r,
+            sample_rate_hz: BT_HAPTICS_SAMPLE_RATE_HZ,
+        };
+        let rumble_gain = *self.rumble_gain.read();
         let extension_enabled = *self.extension_enabled.read();
         let autostart_on_launch = *self.autostart_on_launch.read();
         let connected = extension_enabled && *self.connected.read();
@@ -146,10 +333,13 @@ impl DualSenseManager {
         } else {
             BatteryState::default()
         };
-        let profiles = self.profiles.read().clone();
+        let mut profiles = self.profiles.read().clone();
+        profiles.extend(self.custom_profiles.read().iter().cloned());
         let mic_muted = *self.mic_muted.read();
         let audio_device_detected = connected && *self.audio_device_detected.read();
         let speaker_volume = *self.speaker_volume.read();
+        let virtual_driver = self.get_virtual_driver_status();
+        let game_profile_rules = self.game_profile_rules.read().clone();
 
         DualSenseStatus {
             extension_enabled,
@@ -166,6 +356,13 @@ impl DualSenseManager {
             mic_muted,
             audio_device_detected,
             speaker_volume,
+            mapping,
+            haptics,
+            haptics_metrics,
+            rumble_gain,
+            cemuhook_stats,
+            virtual_driver,
+            game_profile_rules,
         }
     }
 
@@ -175,11 +372,7 @@ impl DualSenseManager {
         let is_muted = *muted;
 
         let mut lighting = self.lighting.write();
-        lighting.mic_led = if is_muted {
-            crate::lightbar::MicLed::Solid
-        } else {
-            crate::lightbar::MicLed::Off
-        };
+        lighting.mic_led = if is_muted { MicLed::Solid } else { MicLed::Off };
 
         tracing::info!(
             "DualSense microphone mute toggled: muted={}, mic_led={:?}",
@@ -193,11 +386,7 @@ impl DualSenseManager {
     pub fn set_microphone_mute(&self, muted: bool) {
         *self.mic_muted.write() = muted;
         let mut lighting = self.lighting.write();
-        lighting.mic_led = if muted {
-            crate::lightbar::MicLed::Solid
-        } else {
-            crate::lightbar::MicLed::Off
-        };
+        lighting.mic_led = if muted { MicLed::Solid } else { MicLed::Off };
         tracing::info!(
             "DualSense microphone mute explicitly set: muted={}, mic_led={:?}",
             muted,
@@ -241,6 +430,77 @@ impl DualSenseManager {
         *self.lighting.write() = lighting;
     }
 
+    pub fn set_mapping(&self, mapping: InputMappingConfig) {
+        *self.mapping.write() = mapping;
+        tracing::info!("DualSense input mapping & tuning updated");
+    }
+
+    pub fn get_mapping(&self) -> InputMappingConfig {
+        self.mapping.read().clone()
+    }
+
+    pub fn set_haptics(&self, mut config: HapticsConfig) {
+        config.gain = config.gain.clamp(0.0, 2.0);
+        config.lowpass_cutoff_hz = config.lowpass_cutoff_hz.clamp(40.0, 500.0);
+        config.left_balance = config.left_balance.clamp(0.0, 1.0);
+        config.right_balance = config.right_balance.clamp(0.0, 1.0);
+        if !config.enabled || config.mode == HapticsMode::Off {
+            self.haptics_queue.clear();
+            *self.haptics_levels.write() = (0.0, 0.0);
+        }
+        *self.haptics.write() = config;
+        tracing::info!("DualSense Bluetooth HD haptics config updated");
+    }
+
+    pub fn get_haptics(&self) -> HapticsConfig {
+        self.haptics.read().clone()
+    }
+
+    pub fn is_bt_hd_haptics_active(&self) -> bool {
+        let h = self.haptics.read();
+        h.enabled
+            && matches!(
+                h.mode,
+                HapticsMode::BluetoothHdHaptics | HapticsMode::AudioToHaptics
+            )
+    }
+
+    /// Enqueues synthetic 3 kHz S8 haptic blocks for immediate Bluetooth 0x32 testing
+    pub fn trigger_hd_haptic_pulse(&self, freq_hz: f32, amplitude: f32, duration_ms: u32) -> usize {
+        let blocks = generate_test_haptic_blocks(freq_hz, amplitude, duration_ms);
+        let count = blocks.len();
+        self.haptics_queue.push_many(blocks);
+        *self.haptics_levels.write() = (amplitude.clamp(0.0, 1.0), amplitude.clamp(0.0, 1.0));
+        count
+    }
+
+    pub fn push_haptic_block(&self, block: [i8; BT_HAPTICS_BYTES_PER_PACKET], levels: (f32, f32)) {
+        self.haptics_queue.push(block);
+        *self.haptics_levels.write() = levels;
+    }
+
+    pub fn pop_next_haptic_block(&self) -> Option<[i8; BT_HAPTICS_BYTES_PER_PACKET]> {
+        self.haptics_queue.pop()
+    }
+
+    pub fn record_haptic_packet_sent(&self) {
+        self.haptics_packets_sent.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn set_rumble_gain(&self, gain: f32) {
+        *self.rumble_gain.write() = gain.clamp(0.0, 2.0);
+    }
+
+    pub fn get_rumble_gain(&self) -> f32 {
+        *self.rumble_gain.read()
+    }
+
+    pub fn set_rumble_direct(&self, heavy: u8, light: u8) {
+        let gain = *self.rumble_gain.read();
+        *self.shared_state.heavy_rumble.write() = apply_rumble_gain(heavy, gain);
+        *self.shared_state.light_rumble.write() = apply_rumble_gain(light, gain);
+    }
+
     pub fn set_emulation(&self, config: EmulationConfig) -> bool {
         tracing::info!(
             "DualSense emulation configured: mode={:?}, gyro_enabled={}, gyro_sensitivity={}",
@@ -248,18 +508,116 @@ impl DualSenseManager {
             config.gyro.enabled,
             config.gyro.sensitivity
         );
-        let ok = self.virtual_bus.lock().set_mode(config.mode);
+        let ok = match config.mode {
+            EmulationMode::DualSense => {
+                self.virtual_bus.lock().unplug();
+                let mut vds = self.virtual_dualsense.lock();
+                if vds.is_available() {
+                    vds.plug(EmulationMode::DualSense).is_ok()
+                } else {
+                    // On Windows with USB/IP, server can be started asynchronously via start_usbip_virtual_dualsense
+                    *self.usbip_running_flag.read() || is_usbip_client_installed()
+                }
+            }
+            other => {
+                self.virtual_dualsense.lock().unplug();
+                self.virtual_bus.lock().set_mode(other)
+            }
+        };
         *self.emulation.write() = config;
         ok
     }
 
+    /// Applies bidirectional feedback received from a virtual controller (Virtual DualSense / DS4 / X360)
+    pub fn apply_virtual_feedback(&self, event: VirtualFeedbackEvent) {
+        let gain = *self.rumble_gain.read();
+        if let Some(heavy) = event.heavy_rumble {
+            *self.shared_state.heavy_rumble.write() = apply_rumble_gain(heavy, gain);
+        }
+        if let Some(light) = event.light_rumble {
+            *self.shared_state.light_rumble.write() = apply_rumble_gain(light, gain);
+        }
+        if let Some(triggers) = event.triggers {
+            *self.shared_state.triggers.write() = triggers;
+        }
+        if let Some(rgb) = event.lightbar {
+            *self.shared_state.lightbar.write() = rgb;
+            self.lighting.write().lightbar = LightbarMode::Static { color: rgb };
+        }
+        if let Some(player_led) = event.player_led {
+            self.lighting.write().player_led = player_led;
+        }
+        if let Some(mic_led) = event.mic_led {
+            self.lighting.write().mic_led = mic_led;
+        }
+    }
+
+    /// Polls pending feedback events from the active Virtual DualSense backend and applies them
+    pub fn poll_virtual_feedback(&self) -> usize {
+        let mut applied = 0usize;
+        loop {
+            let next = self.virtual_dualsense.lock().poll_feedback();
+            match next {
+                Some(ev) => {
+                    self.apply_virtual_feedback(ev);
+                    applied += 1;
+                }
+                None => break,
+            }
+        }
+        if let Ok(usbip) = self.usbip_server.try_lock() {
+            while let Some(ev) = usbip.pop_feedback() {
+                self.apply_virtual_feedback(ev);
+                applied += 1;
+            }
+        }
+        applied
+    }
+
+    pub fn add_custom_profile(&self, profile: TriggerProfile) {
+        let mut custom = self.custom_profiles.write();
+        if let Some(existing) = custom.iter_mut().find(|p| p.id == profile.id) {
+            *existing = profile;
+        } else {
+            custom.push(profile);
+        }
+    }
+
+    pub fn delete_custom_profile(&self, profile_id: &str) -> bool {
+        let mut custom = self.custom_profiles.write();
+        let before = custom.len();
+        custom.retain(|p| p.id != profile_id);
+        custom.len() < before
+    }
+
+    pub fn set_game_profile_rules(&self, rules: Vec<GameProfileRule>) {
+        *self.game_profile_rules.write() = rules;
+    }
+
+    pub fn get_game_profile_rules(&self) -> Vec<GameProfileRule> {
+        self.game_profile_rules.read().clone()
+    }
+
     pub fn apply_profile(&self, profile_id: &str) -> bool {
-        let profiles = self.profiles.read();
-        if let Some(p) = profiles.iter().find(|p| p.id == profile_id) {
+        let found = self
+            .profiles
+            .read()
+            .iter()
+            .find(|p| p.id == profile_id)
+            .cloned()
+            .or_else(|| {
+                self.custom_profiles
+                    .read()
+                    .iter()
+                    .find(|p| p.id == profile_id)
+                    .cloned()
+            });
+
+        if let Some(p) = found {
             *self.shared_state.triggers.write() = p.triggers.clone();
             *self.shared_state.lightbar.write() = p.lightbar;
             let mut lighting = self.lighting.write();
-            lighting.lightbar = crate::lightbar::LightbarMode::Static { color: p.lightbar };
+            lighting.lightbar = LightbarMode::Static { color: p.lightbar };
             tracing::info!(
                 "DualSense preset profile applied: id='{}' ({}), L2={}, R2={}, RGB=({},{},{})",
                 p.id,
@@ -277,13 +635,31 @@ impl DualSenseManager {
         }
     }
 
-    /// Generates current output report for physical controller transmission
+    /// Generates current output report snapshot at elapsed_secs = 0.0
     pub fn build_current_output_report(&self) -> OutputReportBuilder {
+        self.build_output_report_at(0.0)
+    }
+
+    /// Generates current output report evaluating animated lightbar modes (`Breathing`, `Rainbow`,
+    /// `BatteryLevel` charging pulse) at `elapsed_secs` for the 40 Hz HID output loop.
+    pub fn build_output_report_at(&self, elapsed_secs: f32) -> OutputReportBuilder {
         let triggers = self.shared_state.triggers.read().clone();
         let lighting = self.lighting.read().clone();
-        let lightbar_color = *self.shared_state.lightbar.read();
+        let input = self.input_state.read().clone();
+        let lightbar_color = match &lighting.lightbar {
+            LightbarMode::Breathing { .. }
+            | LightbarMode::Rainbow { .. }
+            | LightbarMode::BatteryLevel => lighting.lightbar.compute_color(
+                elapsed_secs,
+                input.battery.percentage,
+                input.battery.is_charging,
+            ),
+            LightbarMode::Off => crate::lightbar::RgbColor::BLACK,
+            LightbarMode::Static { .. } => *self.shared_state.lightbar.read(),
+        };
         let heavy = *self.shared_state.heavy_rumble.read();
         let light = *self.shared_state.light_rumble.read();
+        let bt_hd_haptics = self.is_bt_hd_haptics_active();
 
         OutputReportBuilder::new()
             .with_triggers(triggers)
@@ -291,6 +667,7 @@ impl DualSenseManager {
             .with_player_led(lighting.player_led)
             .with_mic_led(lighting.mic_led)
             .with_rumble(heavy, light)
+            .with_bt_hd_haptics(bt_hd_haptics)
     }
 
     pub fn get_triggers(&self) -> DualTriggerConfig {
@@ -301,12 +678,52 @@ impl DualSenseManager {
         self.lighting.read().clone()
     }
 
+    pub fn cemuhook_port(&self) -> u16 {
+        self.cemuhook_port
+    }
+
+    /// Exports current configuration into a serializable `AppConfig` for disk persistence
+    pub async fn export_config(&self) -> AppConfig {
+        let udp_enabled = self.udp_server.lock().await.stats().running;
+        let cemuhook_enabled = self.cemuhook_server.lock().await.stats().running;
+        AppConfig {
+            extension_enabled: *self.extension_enabled.read(),
+            autostart_on_launch: *self.autostart_on_launch.read(),
+            triggers: self.shared_state.triggers.read().clone(),
+            lighting: self.lighting.read().clone(),
+            emulation: self.emulation.read().clone(),
+            mapping: self.mapping.read().clone(),
+            haptics: self.haptics.read().clone(),
+            rumble_gain: *self.rumble_gain.read(),
+            udp_enabled,
+            cemuhook_enabled,
+            custom_profiles: self.custom_profiles.read().clone(),
+            game_profile_rules: self.game_profile_rules.read().clone(),
+        }
+    }
+
+    /// Applies a persisted `AppConfig` onto this manager
+    pub fn apply_config(&self, cfg: &AppConfig) {
+        self.set_extension_enabled(cfg.extension_enabled);
+        self.set_autostart_enabled(cfg.autostart_on_launch);
+        self.set_triggers(cfg.triggers.clone());
+        self.set_lighting(cfg.lighting.clone());
+        self.set_mapping(cfg.mapping.clone());
+        self.set_haptics(cfg.haptics.clone());
+        self.set_rumble_gain(cfg.rumble_gain);
+        *self.custom_profiles.write() = cfg.custom_profiles.clone();
+        *self.game_profile_rules.write() = cfg.game_profile_rules.clone();
+        let _ = self.set_emulation(cfg.emulation.clone());
+    }
+
     pub fn set_connected(&self, connected: bool, name: &str) {
         *self.connected.write() = connected;
         *self.controller_name.write() = name.to_string();
         *self.audio_device_detected.write() = connected;
         if !connected {
             self.input_state.write().battery = BatteryState::default();
+            *self.shared_state.heavy_rumble.write() = 0;
+            *self.shared_state.light_rumble.write() = 0;
         }
     }
 
@@ -314,12 +731,14 @@ impl DualSenseManager {
         *self.mic_toggle_callback.write() = Some(handler);
     }
 
-    pub fn update_input_state(&self, new_state: DualSenseInputState) -> Option<bool> {
+    pub fn update_input_state(&self, raw_state: DualSenseInputState) -> Option<bool> {
+        let mapping_cfg = self.mapping.read().clone();
+        let mapped_state = apply_input_mapping(&raw_state, &mapping_cfg);
+
         let mut toggled_to = None;
         let prev_pressed = *self.prev_mic_btn.read();
-        let curr_pressed = new_state.mic_mute;
+        let curr_pressed = mapped_state.mic_mute;
         if curr_pressed && !prev_pressed {
-            // Physical button pressed edge
             let new_muted = self.toggle_microphone();
             if let Some(cb) = self.mic_toggle_callback.read().as_ref() {
                 cb(new_muted);
@@ -327,20 +746,38 @@ impl DualSenseManager {
             toggled_to = Some(new_muted);
         }
         let lightbar_mode = self.lighting.read().lightbar.clone();
-        if matches!(lightbar_mode, crate::lightbar::LightbarMode::BatteryLevel) {
+        if matches!(lightbar_mode, LightbarMode::BatteryLevel) {
             *self.shared_state.lightbar.write() = lightbar_mode.compute_color(
                 0.0,
-                new_state.battery.percentage,
-                new_state.battery.is_charging,
+                mapped_state.battery.percentage,
+                mapped_state.battery.is_charging,
             );
         }
         *self.prev_mic_btn.write() = curr_pressed;
-        *self.input_state.write() = new_state.clone();
+        *self.input_state.write() = mapped_state.clone();
 
-        // Forward input state to emulated virtual controller (Xbox 360 / DualShock 4)
-        {
-            let gyro = self.emulation.read().gyro.clone();
-            self.virtual_bus.lock().submit_input(&new_state, &gyro);
+        // Update Cemuhook motion server state (non-blocking)
+        if let Ok(cemu) = self.cemuhook_server.try_lock() {
+            cemu.update_state(*self.connected.read(), mapped_state.clone());
+        }
+
+        // Forward mapped input state to emulated virtual controller (Xbox 360 / DS4 / Virtual DualSense)
+        let emu = self.emulation.read().clone();
+        match emu.mode {
+            EmulationMode::DualSense => {
+                self.virtual_dualsense
+                    .lock()
+                    .submit_input(&mapped_state, &emu.gyro);
+                if let Ok(usbip) = self.usbip_server.try_lock() {
+                    usbip.update_input(mapped_state);
+                }
+            }
+            EmulationMode::Xbox360 | EmulationMode::DualShock4 => {
+                self.virtual_bus
+                    .lock()
+                    .submit_input(&mapped_state, &emu.gyro);
+            }
+            EmulationMode::Native => {}
         }
 
         toggled_to
@@ -407,7 +844,7 @@ mod tests {
         let racing_status = manager.get_status().await;
         assert_eq!(
             racing_status.lighting.lightbar,
-            crate::lightbar::LightbarMode::Static {
+            LightbarMode::Static {
                 color: RgbColor::RED
             }
         );
@@ -422,18 +859,12 @@ mod tests {
         let toggled = manager.toggle_microphone();
         assert!(toggled);
         assert!(manager.get_status().await.mic_muted);
-        assert_eq!(
-            manager.get_status().await.lighting.mic_led,
-            crate::lightbar::MicLed::Solid
-        );
+        assert_eq!(manager.get_status().await.lighting.mic_led, MicLed::Solid);
 
         let toggled_back = manager.toggle_microphone();
         assert!(!toggled_back);
         assert!(!manager.get_status().await.mic_muted);
-        assert_eq!(
-            manager.get_status().await.lighting.mic_led,
-            crate::lightbar::MicLed::Off
-        );
+        assert_eq!(manager.get_status().await.lighting.mic_led, MicLed::Off);
 
         // Test physical button edge detection
         let input_press = DualSenseInputState {
@@ -441,32 +872,26 @@ mod tests {
             ..Default::default()
         };
         let event = manager.update_input_state(input_press);
-        assert_eq!(event, Some(true)); // Toggled to muted
+        assert_eq!(event, Some(true));
         assert!(manager.get_status().await.mic_muted);
 
-        // While held down, should not trigger again
         let input_hold = DualSenseInputState {
             mic_mute: true,
             ..Default::default()
         };
-        let event_hold = manager.update_input_state(input_hold);
-        assert_eq!(event_hold, None);
+        assert_eq!(manager.update_input_state(input_hold), None);
 
-        // Released
         let input_release = DualSenseInputState {
             mic_mute: false,
             ..Default::default()
         };
-        let event_rel = manager.update_input_state(input_release);
-        assert_eq!(event_rel, None);
+        assert_eq!(manager.update_input_state(input_release), None);
 
-        // Press again -> unmutes
         let input_press2 = DualSenseInputState {
             mic_mute: true,
             ..Default::default()
         };
-        let event2 = manager.update_input_state(input_press2);
-        assert_eq!(event2, Some(false)); // Toggled to unmuted
+        assert_eq!(manager.update_input_state(input_press2), Some(false));
         assert!(!manager.get_status().await.mic_muted);
     }
 }

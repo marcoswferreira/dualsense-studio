@@ -107,6 +107,7 @@ fn build_usb_input_report(
     raw
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_bt_extended_input_report(
     lx: u8,
     ly: u8,
@@ -608,4 +609,283 @@ async fn e2e_audio_and_microphone_workflow() {
     assert_eq!(bt[11], MicLed::Pulse.to_byte());
     assert_eq!(bt[46], PlayerLed::All.to_bitmask());
     verify_bt_crc32(&bt);
+}
+
+/// E2E: Virtual DualSense bidirectional bridge (Physical Input -> Mapping -> Virtual DualSense ->
+/// Game Output Report 0x02 -> DualSenseManager -> Physical USB 0x02 & Bluetooth 0x31 with CRC32)
+#[tokio::test]
+async fn e2e_virtual_dualsense_bidirectional_bridge_with_mapping() {
+    use dualsense_core::mapping::{ButtonAction, ButtonId, InputMappingConfig};
+    use dualsense_core::virtual_device::{
+        decode_dualsense_usb_output_report, MockVirtualDualSenseBackend,
+    };
+
+    let manager = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    manager.set_extension_enabled(true);
+    manager.set_connected(true, "Sony DualSense Edge Wireless Controller");
+    manager.set_rumble_gain(1.5);
+
+    // Remap Edge PaddleLeft -> Cross so virtual controller sees Cross
+    let mut map_cfg = InputMappingConfig::default();
+    map_cfg.button_remaps.insert(
+        ButtonId::PaddleLeft,
+        ButtonAction::Button {
+            target: ButtonId::Cross,
+        },
+    );
+    manager.set_mapping(map_cfg);
+
+    let mut mock = MockVirtualDualSenseBackend::new();
+    let game_output = OutputReportBuilder::new()
+        .with_triggers(DualTriggerConfig {
+            left: TriggerEffect::Bow {
+                start_position: 1,
+                end_position: 8,
+                force: 4,
+                snap_force: 7,
+            },
+            right: TriggerEffect::Weapon {
+                start_position: 2,
+                end_position: 6,
+                force: 8,
+            },
+        })
+        .with_lightbar(RgbColor::CYAN)
+        .with_player_led(PlayerLed::Player2)
+        .with_mic_led(MicLed::Solid)
+        .with_rumble(100, 60)
+        .build_usb();
+
+    assert!(decode_dualsense_usb_output_report(&game_output).is_some());
+    assert!(mock.inject_game_output_report(&game_output));
+
+    manager.set_virtual_dualsense_backend(Box::new(mock));
+    assert!(manager.set_emulation(EmulationConfig {
+        mode: EmulationMode::DualSense,
+        gyro: GyroSettings::default(),
+    }));
+
+    // Submit physical input with Edge PaddleLeft pressed
+    let raw_input = dualsense_core::DualSenseInputState {
+        paddle_left: true,
+        left_stick_x: 128,
+        left_stick_y: 128,
+        ..Default::default()
+    };
+    manager.update_input_state(raw_input);
+
+    // Poll game feedback from virtual DualSense back into manager
+    let applied = manager.poll_virtual_feedback();
+    assert_eq!(applied, 1);
+
+    let out_usb = manager.build_current_output_report().build_usb();
+    assert_eq!(out_usb[4], 150); // heavy rumble 100 * 1.5 gain
+    assert_eq!(out_usb[3], 90); // light rumble 60 * 1.5 gain
+    assert_eq!(out_usb[11], 0x25); // R2 Weapon from game
+    assert_eq!(out_usb[22], 0x22); // L2 Bow from game
+    assert_eq!(out_usb[44], PlayerLed::Player2.to_bitmask());
+    assert_eq!(out_usb[9], MicLed::Solid.to_byte());
+    assert_eq!(
+        out_usb[45..48],
+        [RgbColor::CYAN.r, RgbColor::CYAN.g, RgbColor::CYAN.b]
+    );
+
+    let out_bt = manager
+        .build_current_output_report()
+        .with_seq(7)
+        .build_bluetooth();
+    verify_bt_crc32(&out_bt);
+}
+
+/// E2E: Bluetooth HD Haptics (Report 0x32) + Audio-to-Haptics 48 kHz -> 3 kHz DSP pipeline
+#[tokio::test]
+async fn e2e_bluetooth_hd_haptics_0x32_and_audio_dsp_pipeline() {
+    use dualsense_core::haptics_audio::{AudioToHapticsDsp, HapticsConfig, HapticsMode};
+    use dualsense_core::protocol::{build_bluetooth_haptics_0x32, BT_HAPTICS_REPORT_SIZE};
+
+    let manager = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    let haptics_cfg = HapticsConfig {
+        mode: HapticsMode::AudioToHaptics,
+        enabled: true,
+        gain: 1.4,
+        lowpass_cutoff_hz: 180.0,
+        left_balance: 1.0,
+        right_balance: 0.8,
+        audio_source: "default_loopback".to_string(),
+    };
+    manager.set_haptics(haptics_cfg.clone());
+    assert!(manager.is_bt_hd_haptics_active());
+
+    // Process 1024 stereo 48 kHz frames -> 2 blocks of 32 stereo 3 kHz S8 frames
+    let mut dsp = AudioToHapticsDsp::new();
+    let mut pcm_48k = Vec::with_capacity(1024 * 2);
+    for i in 0..1024 {
+        let t = i as f32 / 48000.0;
+        let wave = (2.0 * std::f32::consts::PI * 90.0 * t).sin();
+        pcm_48k.push(wave);
+        pcm_48k.push(wave * 0.7);
+    }
+
+    let blocks = dsp.process_stereo_48k(&pcm_48k, &haptics_cfg);
+    assert_eq!(blocks.len(), 2);
+    for b in blocks {
+        manager.push_haptic_block(b, dsp.levels());
+    }
+
+    let popped = manager
+        .pop_next_haptic_block()
+        .expect("haptic block queued");
+    let pkt = build_bluetooth_haptics_0x32(4, 11, &popped);
+    assert_eq!(pkt.len(), BT_HAPTICS_REPORT_SIZE);
+    assert_eq!(pkt[0], 0x32);
+    assert_eq!(pkt[1], 4 << 4);
+    assert_eq!(&pkt[2..5], &[0x91, 0x07, 0xFE]);
+    assert_eq!(pkt[5], 16);
+    assert_eq!(pkt[10], 11);
+    assert_eq!(&pkt[11..13], &[0x92, 0x40]);
+
+    // Verify CRC32 over [0xA2] || pkt[0..138]
+    let crc = LittleEndian::read_u32(&pkt[138..142]);
+    let mut hasher = Hasher::new();
+    hasher.update(&[0xA2]);
+    hasher.update(&pkt[0..138]);
+    assert_eq!(hasher.finalize(), crc);
+
+    // Control report 0x31 in HD Haptics mode must clear legacy rumble flags & preserve RELEASE_LEDS=0
+    let bt_ctrl = manager
+        .build_current_output_report()
+        .with_seq(4)
+        .build_bluetooth();
+    assert_eq!(bt_ctrl[3] & 0x03, 0);
+    assert_eq!(bt_ctrl[4] & 0x08, 0);
+    assert_eq!(bt_ctrl[4] & 0x62, 0x62);
+    verify_bt_crc32(&bt_ctrl);
+}
+
+/// E2E: Live Cemuhook Motion UDP Server (DSU protocol) streaming IMU motion from manager
+#[tokio::test]
+async fn e2e_cemuhook_motion_udp_live_streaming() {
+    use dualsense_core::cemuhook::{DSU_PROTOCOL_VERSION, MSG_TYPE_DATA, MSG_TYPE_PORTS};
+
+    let udp_port = allocate_free_udp_port();
+    let cemu_port = allocate_free_udp_port();
+    let manager = DualSenseManager::with_ports(udp_port, cemu_port);
+    manager.set_extension_enabled(true);
+    manager.set_connected(true, "Sony DualSense Wireless Controller");
+
+    let mut state = dualsense_core::DualSenseInputState::default();
+    state.battery.percentage = 90;
+    state.motion.accel_z = 8192;
+    state.motion.gyro_z = 4096;
+    manager.update_input_state(state);
+
+    manager
+        .start_cemuhook()
+        .await
+        .expect("start cemuhook server");
+
+    let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let target = SocketAddr::from(([127, 0, 0, 1], cemu_port));
+
+    // Build DSUC MSG_TYPE_PORTS request for slot 0
+    let mut req_ports = vec![0u8; 25];
+    req_ports[0..4].copy_from_slice(b"DSUC");
+    LittleEndian::write_u16(&mut req_ports[4..6], DSU_PROTOCOL_VERSION);
+    LittleEndian::write_u16(&mut req_ports[6..8], 9);
+    LittleEndian::write_u32(&mut req_ports[12..16], 99);
+    LittleEndian::write_u32(&mut req_ports[16..20], MSG_TYPE_PORTS);
+    LittleEndian::write_i32(&mut req_ports[20..24], 1);
+    req_ports[24] = 0;
+    let mut h = Hasher::new();
+    h.update(&req_ports);
+    let crc = h.finalize();
+    LittleEndian::write_u32(&mut req_ports[8..12], crc);
+
+    client.send_to(&req_ports, target).await.unwrap();
+    let mut resp_ports = [0u8; 128];
+    let (n, _) = tokio::time::timeout(Duration::from_secs(2), client.recv_from(&mut resp_ports))
+        .await
+        .expect("timeout on DSU ports")
+        .unwrap();
+    assert_eq!(n, 32);
+    assert_eq!(&resp_ports[0..4], b"DSUS");
+    assert_eq!(resp_ports[21], 2); // Connected
+
+    // Build DSUC MSG_TYPE_DATA subscription
+    let mut req_data = vec![0u8; 28];
+    req_data[0..4].copy_from_slice(b"DSUC");
+    LittleEndian::write_u16(&mut req_data[4..6], DSU_PROTOCOL_VERSION);
+    LittleEndian::write_u16(&mut req_data[6..8], 12);
+    LittleEndian::write_u32(&mut req_data[12..16], 99);
+    LittleEndian::write_u32(&mut req_data[16..20], MSG_TYPE_DATA);
+    let mut h2 = Hasher::new();
+    h2.update(&req_data);
+    let crc2 = h2.finalize();
+    LittleEndian::write_u32(&mut req_data[8..12], crc2);
+
+    client.send_to(&req_data, target).await.unwrap();
+    let mut resp_data = [0u8; 128];
+    let (n2, _) = tokio::time::timeout(Duration::from_secs(2), client.recv_from(&mut resp_data))
+        .await
+        .expect("timeout on DSU data")
+        .unwrap();
+    assert_eq!(n2, 100);
+    assert_eq!(LittleEndian::read_u32(&resp_data[16..20]), MSG_TYPE_DATA);
+    assert!((LittleEndian::read_f32(&resp_data[84..88]) - 1.0).abs() < 1e-3); // 1.0 G
+    assert!((LittleEndian::read_f32(&resp_data[96..100]) - 250.0).abs() < 1e-1); // 250 deg/s
+
+    manager.stop_cemuhook().await;
+    assert!(!manager.get_status().await.cemuhook_stats.running);
+}
+
+/// E2E: Standalone disk persistence roundtrip (AppConfig + custom profiles + game rules)
+#[tokio::test]
+async fn e2e_standalone_config_persistence_and_restore() {
+    use dualsense_core::storage::{AppConfig, GameProfileRule};
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let cfg_path = tmp.path().join("config.json");
+
+    let mgr_a = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    mgr_a.set_extension_enabled(true);
+    mgr_a.set_rumble_gain(1.35);
+    mgr_a.add_custom_profile(TriggerProfile {
+        id: "custom_returnal".to_string(),
+        name: "Returnal Alt-Fire".to_string(),
+        description: "Half-pull aim + full-pull alt-fire".to_string(),
+        triggers: DualTriggerConfig::new(
+            TriggerEffect::Weapon {
+                start_position: 2,
+                end_position: 5,
+                force: 7,
+            },
+            TriggerEffect::MachineGun {
+                start_position: 1,
+                end_position: 8,
+                strength: 6,
+                frequency: 20,
+            },
+        ),
+        lightbar: RgbColor::PURPLE,
+    });
+    mgr_a.set_game_profile_rules(vec![GameProfileRule {
+        process_name: "Returnal-Win64-Shipping.exe".to_string(),
+        profile_id: "custom_returnal".to_string(),
+        enabled: true,
+    }]);
+
+    let exported = mgr_a.export_config().await;
+    exported.save_to_path(&cfg_path).expect("save config.json");
+
+    let loaded = AppConfig::load_from_path(&cfg_path);
+    let mgr_b = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    mgr_b.apply_config(&loaded);
+
+    assert!((mgr_b.get_rumble_gain() - 1.35).abs() < 1e-5);
+    assert!(mgr_b.apply_profile("custom_returnal"));
+    assert_eq!(mgr_b.get_game_profile_rules().len(), 1);
+    assert_eq!(
+        mgr_b.get_game_profile_rules()[0].process_name,
+        "Returnal-Win64-Shipping.exe"
+    );
 }

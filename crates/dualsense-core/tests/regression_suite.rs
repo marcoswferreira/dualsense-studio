@@ -818,3 +818,200 @@ async fn regression_manager_state_isolation_and_udp_idempotency() {
     manager.stop_udp().await;
     assert!(!manager.get_status().await.udp_stats.running);
 }
+
+/// REG-11 & REG-12: Bluetooth HD Haptics 0x32 binary layout/CRC32 and 0x31 HD mode flag safety.
+#[test]
+fn regression_bluetooth_0x32_haptics_packet_and_0x31_hd_mode_flags() {
+    use dualsense_core::protocol::{build_bluetooth_haptics_0x32, BT_HAPTICS_REPORT_SIZE};
+
+    let extremes: [[i8; 64]; 3] = [[0; 64], [i8::MAX; 64], [i8::MIN; 64]];
+    for (idx, pcm) in extremes.iter().enumerate() {
+        let pkt = build_bluetooth_haptics_0x32(idx as u8, (idx as u8) * 10, pcm);
+        assert_eq!(pkt.len(), BT_HAPTICS_REPORT_SIZE);
+        assert_eq!(pkt[0], 0x32);
+        assert_eq!(pkt[1], ((idx as u8) & 0x0F) << 4);
+        assert_eq!(&pkt[2..5], &[0x91, 0x07, 0xFE]);
+        assert_eq!(pkt[5], 16);
+        assert_eq!(pkt[10], (idx as u8) * 10);
+        assert_eq!(&pkt[11..13], &[0x92, 0x40]);
+
+        let crc = LittleEndian::read_u32(&pkt[138..142]);
+        let mut hasher = Hasher::new();
+        hasher.update(&[0xA2]);
+        hasher.update(&pkt[0..138]);
+        assert_eq!(hasher.finalize(), crc);
+    }
+
+    // HD Haptics mode on BT 0x31 must clear legacy rumble bits (0x01|0x02) and never set RELEASE_LEDS (0x08)
+    let bt_hd = OutputReportBuilder::new()
+        .with_rumble(255, 255)
+        .with_bt_hd_haptics(true)
+        .build_bluetooth();
+    assert_eq!(bt_hd[3], 0x0C);
+    assert_eq!(bt_hd[4] & 0x08, 0);
+    assert_eq!(bt_hd[4], 0x15 | 0x02 | 0x20 | 0x40);
+    assert_eq!(bt_hd[5], 0);
+    assert_eq!(bt_hd[6], 0);
+}
+
+/// REG-13: ViGEmBus notification IOCTL ABI sizes, parsers, rumble gain clamping, and disconnect zeroing.
+#[test]
+fn regression_vigem_notification_abi_and_rumble_gain_clamping() {
+    use dualsense_core::vigem::{
+        apply_rumble_gain, parse_ds4_notification, parse_xusb_notification, Ds4RequestNotification,
+        XusbRequestNotification, IOCTL_DS4_REQUEST_NOTIFICATION, IOCTL_XUSB_REQUEST_NOTIFICATION,
+    };
+
+    assert_eq!(IOCTL_XUSB_REQUEST_NOTIFICATION, 0x2AA804);
+    assert_eq!(IOCTL_DS4_REQUEST_NOTIFICATION, 0x2AA810);
+    assert_eq!(size_of::<XusbRequestNotification>(), 12);
+    assert_eq!(size_of::<Ds4RequestNotification>(), 16);
+
+    let x_ev = parse_xusb_notification(&XusbRequestNotification {
+        size: 12,
+        serial_no: 1,
+        large_motor: 180,
+        small_motor: 90,
+        led_number: 0,
+    });
+    assert_eq!(x_ev.heavy_rumble, Some(180));
+    assert_eq!(x_ev.light_rumble, Some(90));
+
+    let ds4_ev = parse_ds4_notification(&Ds4RequestNotification {
+        size: 16,
+        serial_no: 1,
+        large_motor: 200,
+        small_motor: 100,
+        lightbar_red: 10,
+        lightbar_green: 20,
+        lightbar_blue: 30,
+        flash_on: 0,
+        flash_off: 0,
+    });
+    assert_eq!(ds4_ev.heavy_rumble, Some(200));
+    assert_eq!(ds4_ev.lightbar, Some(RgbColor::new(10, 20, 30)));
+
+    assert_eq!(apply_rumble_gain(100, -1.0), 0);
+    assert_eq!(apply_rumble_gain(100, 0.5), 50);
+    assert_eq!(apply_rumble_gain(200, 2.0), 255);
+    assert_eq!(apply_rumble_gain(200, 10.0), 255);
+}
+
+/// REG-14: Input mapping pipeline edge cases (deadzones, curves, Edge paddles, gyro activation, touchpad modes).
+#[test]
+fn regression_input_mapping_edge_cases_and_edge_paddles() {
+    use dualsense_core::mapping::{
+        apply_input_mapping, GyroActivation, InputMappingConfig, ResponseCurve, StickTuning,
+        TouchpadMode,
+    };
+
+    // Parse DualSense Edge Fn & Paddle bits from raw USB report byte 10 (buttons3)
+    let mut raw_usb = [0u8; 64];
+    raw_usb[0] = 0x01;
+    raw_usb[1] = 128;
+    raw_usb[2] = 128;
+    raw_usb[3] = 128;
+    raw_usb[4] = 128;
+    raw_usb[10] = 0x10 | 0x20 | 0x40 | 0x80; // FnL, FnR, PaddleL, PaddleR
+    let parsed = parse_input_report(&raw_usb, ConnectionType::Usb).unwrap();
+    assert!(parsed.fn_left && parsed.fn_right && parsed.paddle_left && parsed.paddle_right);
+
+    // Gyro activation HoldL2 zeros gyro when L2 is released, passes gyro when L2 >= 64
+    let mut cfg = InputMappingConfig {
+        left_stick: StickTuning {
+            inner_deadzone: 0.15,
+            outer_deadzone: 0.95,
+            anti_deadzone: 0.1,
+            curve: ResponseCurve::SCurve,
+            invert_x: false,
+            invert_y: false,
+        },
+        gyro_activation: GyroActivation::HoldL2,
+        gyro_calibration_offset: [10, -20, 30],
+        ..Default::default()
+    };
+    cfg.touchpad.mode = TouchpadMode::Disabled;
+
+    let mut state = parsed;
+    state.motion.gyro_x = 110;
+    state.motion.gyro_y = 80;
+    state.motion.gyro_z = 130;
+    state.touch1.active = true;
+    state.touchpad_click = true;
+    state.l2_trigger = 10;
+
+    let mapped_inactive = apply_input_mapping(&state, &cfg);
+    assert_eq!(mapped_inactive.motion.gyro_x, 0);
+    assert!(!mapped_inactive.touch1.active);
+    assert!(!mapped_inactive.touchpad_click);
+
+    state.l2_trigger = 120;
+    let mapped_active = apply_input_mapping(&state, &cfg);
+    assert_eq!(mapped_active.motion.gyro_x, 100);
+    assert_eq!(mapped_active.motion.gyro_y, 100);
+    assert_eq!(mapped_active.motion.gyro_z, 100);
+}
+
+/// REG-15 & REG-16: Animated 40 Hz lightbar evaluation & Virtual DualSense USB 0x02 reverse decoding safety.
+#[test]
+fn regression_animated_lightbar_40hz_and_virtual_dualsense_reverse_decoder() {
+    use dualsense_core::virtual_device::{
+        decode_dualsense_usb_output_report, decode_trigger_payload,
+    };
+
+    let manager = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    manager.set_lighting(LightingConfig {
+        lightbar: LightbarMode::Rainbow { speed: 1.0 },
+        player_led: PlayerLed::Player1,
+        mic_led: MicLed::Off,
+    });
+
+    let at_t0 = manager.build_output_report_at(0.0).build_usb();
+    let at_t2 = manager.build_output_report_at(2.0).build_usb();
+    assert_eq!(at_t0[45..48], [255, 0, 0]); // Red at 0 deg
+    assert_eq!(at_t2[45..48], [0, 255, 0]); // Green at 120 deg
+
+    // Reject invalid/short Virtual DualSense output reports safely
+    assert!(decode_dualsense_usb_output_report(&[]).is_none());
+    assert!(decode_dualsense_usb_output_report(&[0x02; 20]).is_none());
+    assert!(decode_dualsense_usb_output_report(&[0x01; 64]).is_none());
+
+    // Roundtrip all major trigger opcodes through compile_payload -> decode_trigger_payload
+    let effects = [
+        TriggerEffect::Off,
+        TriggerEffect::Feedback {
+            start_position: 2,
+            force: 6,
+        },
+        TriggerEffect::Weapon {
+            start_position: 2,
+            end_position: 7,
+            force: 8,
+        },
+        TriggerEffect::Bow {
+            start_position: 1,
+            end_position: 8,
+            force: 4,
+            snap_force: 7,
+        },
+        TriggerEffect::MachineGun {
+            start_position: 1,
+            end_position: 8,
+            strength: 7,
+            frequency: 20,
+        },
+        TriggerEffect::Vibration {
+            position: 3,
+            amplitude: 12,
+            frequency: 25,
+        },
+        TriggerEffect::GameCube,
+        TriggerEffect::Choppy,
+        TriggerEffect::Hard,
+        TriggerEffect::Rigid,
+    ];
+    for eff in effects {
+        let compiled = eff.compile_payload();
+        assert_eq!(decode_trigger_payload(&compiled), eff);
+    }
+}

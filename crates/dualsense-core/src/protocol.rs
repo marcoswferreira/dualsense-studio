@@ -11,6 +11,7 @@ pub const DUALSENSE_EDGE_PID: u16 = 0x0DF2;
 
 pub const USB_OUTPUT_REPORT_SIZE: usize = 64;
 pub const BT_OUTPUT_REPORT_SIZE: usize = 78;
+pub const BT_HAPTICS_REPORT_SIZE: usize = 142;
 
 /// DualSense connection transport
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -84,6 +85,15 @@ pub struct DualSenseInputState {
     pub ps_button: bool,
     pub touchpad_click: bool,
     pub mic_mute: bool,
+    // DualSense Edge Function & Back Paddles
+    #[serde(default)]
+    pub fn_left: bool,
+    #[serde(default)]
+    pub fn_right: bool,
+    #[serde(default)]
+    pub paddle_left: bool,
+    #[serde(default)]
+    pub paddle_right: bool,
     // Telemetry
     pub battery: BatteryState,
     pub motion: MotionData,
@@ -101,6 +111,8 @@ pub struct OutputReportBuilder {
     pub heavy_rumble: u8,
     pub light_rumble: u8,
     pub seq_num: u8,
+    /// When true on Bluetooth 0x31, configures voice-coil HD Haptics LPF mode (for Report 0x32 streaming)
+    pub bt_hd_haptics: bool,
 }
 
 impl Default for OutputReportBuilder {
@@ -113,6 +125,7 @@ impl Default for OutputReportBuilder {
             heavy_rumble: 0,
             light_rumble: 0,
             seq_num: 0,
+            bt_hd_haptics: false,
         }
     }
 }
@@ -150,6 +163,11 @@ impl OutputReportBuilder {
 
     pub fn with_seq(mut self, seq_num: u8) -> Self {
         self.seq_num = seq_num;
+        self
+    }
+
+    pub fn with_bt_hd_haptics(mut self, enabled: bool) -> Self {
+        self.bt_hd_haptics = enabled;
         self
     }
 
@@ -209,16 +227,30 @@ impl OutputReportBuilder {
         report[1] = ((self.seq_num & 0x0F) << 4) | 0x02;
         report[2] = 0x10; // DS_OUTPUT_TAG (0x10)
 
-        // valid_flag0: Enable rumble and triggers (offset 3)
-        report[3] = 0xFF;
+        // valid_flag0: When bt_hd_haptics is active, keep legacy rumble flags (0x01|0x02) clear
+        // so DualSense voice coils stay in full-power HD audio mode for Report 0x32 while triggers (0x0C) remain active.
+        report[3] = if self.bt_hd_haptics { 0x0C } else { 0xFF };
 
-        // valid_flag1: Enable mic led (0x01), lightbar (0x04), player leds (0x10) (offset 4)
-        // Must NOT set 0x08 (RELEASE_LEDS)
-        report[4] = 0x15;
+        // valid_flag1: Enable mic led (0x01), lightbar (0x04), player leds (0x10).
+        // When bt_hd_haptics is active, also enable LPF & haptic power control (0x02 | 0x20 | 0x40).
+        // Must NEVER set 0x08 (RELEASE_LEDS).
+        report[4] = if self.bt_hd_haptics {
+            0x15 | 0x02 | 0x20 | 0x40
+        } else {
+            0x15
+        };
 
         // Rumble
-        report[5] = self.light_rumble;
-        report[6] = self.heavy_rumble;
+        report[5] = if self.bt_hd_haptics {
+            0
+        } else {
+            self.light_rumble
+        };
+        report[6] = if self.bt_hd_haptics {
+            0
+        } else {
+            self.heavy_rumble
+        };
 
         // Mic LED (common[8] is at index 3 + 8 = 11)
         report[11] = self.mic_led.to_byte();
@@ -257,6 +289,41 @@ impl OutputReportBuilder {
         LittleEndian::write_u32(&mut report[74..78], checksum);
         report
     }
+}
+
+/// Builds a 142-byte DualSense Bluetooth HD Haptics Output Report (Report ID `0x32`)
+/// carrying 32 stereo frames (64 bytes) of 3 kHz 8-bit signed (`S8`) PCM samples with CRC32 (`0xA2` seed).
+pub fn build_bluetooth_haptics_0x32(
+    seq_num: u8,
+    packet_counter: u8,
+    pcm_s8_stereo: &[i8; 64],
+) -> [u8; BT_HAPTICS_REPORT_SIZE] {
+    let mut report = [0u8; BT_HAPTICS_REPORT_SIZE];
+    report[0] = 0x32; // BT HD Haptics Report ID
+    report[1] = (seq_num & 0x0F) << 4;
+    // Sony Bluetooth audio/haptic control header
+    report[2] = 0x91;
+    report[3] = 0x07;
+    report[4] = 0xFE;
+    // Internal firmware frame queue depth indicator
+    report[5] = 16;
+    // Streaming packet counter
+    report[10] = packet_counter;
+    // Haptics sub-packet tag (0x92) + payload byte length (0x40 = 64 bytes)
+    report[11] = 0x92;
+    report[12] = 0x40;
+
+    for (i, &sample) in pcm_s8_stereo.iter().enumerate() {
+        report[13 + i] = sample as u8;
+    }
+
+    let mut hasher = Hasher::new();
+    hasher.update(&[0xA2]);
+    hasher.update(&report[0..138]);
+    let checksum = hasher.finalize();
+    LittleEndian::write_u32(&mut report[138..142], checksum);
+
+    report
 }
 
 /// Parses raw HID input reports from USB (0x01) or Bluetooth (0x01 / 0x31)
@@ -427,6 +494,10 @@ pub fn parse_input_report(buf: &[u8], connection: ConnectionType) -> Option<Dual
     let ps_button = (buttons3 & 0x01) != 0;
     let touchpad_click = (buttons3 & 0x02) != 0;
     let mic_mute = (buttons3 & 0x04) != 0;
+    let fn_left = (buttons3 & 0x10) != 0;
+    let fn_right = (buttons3 & 0x20) != 0;
+    let paddle_left = (buttons3 & 0x40) != 0;
+    let paddle_right = (buttons3 & 0x80) != 0;
 
     let mut state = DualSenseInputState {
         connection,
@@ -455,6 +526,10 @@ pub fn parse_input_report(buf: &[u8], connection: ConnectionType) -> Option<Dual
         ps_button,
         touchpad_click,
         mic_mute,
+        fn_left,
+        fn_right,
+        paddle_left,
+        paddle_right,
         ..Default::default()
     };
 

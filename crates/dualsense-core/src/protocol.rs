@@ -51,7 +51,7 @@ pub struct TouchPoint {
 }
 
 /// High-level parsed state of DualSense inputs
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DualSenseInputState {
     pub connection: ConnectionType,
     // Analog Sticks (0..255, 128 is center)
@@ -99,6 +99,47 @@ pub struct DualSenseInputState {
     pub motion: MotionData,
     pub touch1: TouchPoint,
     pub touch2: TouchPoint,
+}
+
+impl Default for DualSenseInputState {
+    fn default() -> Self {
+        Self {
+            connection: ConnectionType::default(),
+            left_stick_x: 128,
+            left_stick_y: 128,
+            right_stick_x: 128,
+            right_stick_y: 128,
+            l2_trigger: 0,
+            r2_trigger: 0,
+            cross: false,
+            circle: false,
+            square: false,
+            triangle: false,
+            dpad_up: false,
+            dpad_down: false,
+            dpad_left: false,
+            dpad_right: false,
+            l1: false,
+            r1: false,
+            l2_click: false,
+            r2_click: false,
+            l3: false,
+            r3: false,
+            create: false,
+            options: false,
+            ps_button: false,
+            touchpad_click: false,
+            mic_mute: false,
+            fn_left: false,
+            fn_right: false,
+            paddle_left: false,
+            paddle_right: false,
+            battery: BatteryState::default(),
+            motion: MotionData::default(),
+            touch1: TouchPoint::default(),
+            touch2: TouchPoint::default(),
+        }
+    }
 }
 
 /// Builder for DualSense Output Reports (USB 0x02 and Bluetooth 0x31)

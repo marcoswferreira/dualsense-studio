@@ -514,7 +514,7 @@ mod tests {
             BigEndian::write_u32(&mut urb_out[4..8], 2);
             BigEndian::write_u32(&mut urb_out[12..16], 0); // OUT
             BigEndian::write_u32(&mut urb_out[16..20], 3);
-            BigEndian::write_u32(&mut urb_out[24..28], 64);
+            BigEndian::write_u32(&mut urb_out[24..28], game_out.len() as u32);
             client.write_all(&urb_out).await.unwrap();
             client.write_all(&game_out).await.unwrap();
 

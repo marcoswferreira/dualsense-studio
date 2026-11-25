@@ -176,7 +176,9 @@ async fn e2e_http_api_full_lifecycle() {
     let input_val: serde_json::Value =
         serde_json::from_str(&input_body).expect("parse live input JSON");
     assert_eq!(input_val["connected"], true);
-    assert_eq!(input_val["input"]["left_stick_x"], 220);
+    // Default StickTuning applies a 0.05 radial inner deadzone: raw (220, 128) maps to (218, 128)
+    assert_eq!(input_val["input"]["left_stick_x"], 218);
+    assert_eq!(input_val["input"]["left_stick_y"], 128);
     assert_eq!(input_val["input"]["l2_trigger"], 180);
     assert_eq!(input_val["input"]["cross"], true);
 

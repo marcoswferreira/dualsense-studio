@@ -183,6 +183,7 @@ impl HidDeviceWorker {
                     let mut bt_seq: u8 = 0;
                     let mut haptic_pkt_counter: u8 = 0;
                     let mut logged_first_input = false;
+                    let mut sent_led_reset = false;
                     let mut last_logged_state: Option<String> = None;
                     let mut write_error_count: u32 = 0;
                     let mut read_error_count: u32 = 0;
@@ -286,8 +287,50 @@ impl HidDeviceWorker {
                             }
                         }
 
-                        // Send Output Report (Adaptive Triggers, Animated Lightbar, Player LEDs) at 40Hz
-                        if is_ds && last_send.elapsed() >= Duration::from_millis(25) {
+                        // One-shot LED initialization right after first input report confirms transport:
+                        // Sends LIGHT_OUT ONCE (like Linux hid-playstation.c::dualsense_reset_leds) to stop
+                        // the controller's startup blue fade animation so host RGB & Player LEDs take over.
+                        if is_ds && is_currently_connected && !sent_led_reset {
+                            sent_led_reset = true;
+                            let init_pkt = match connection {
+                                ConnectionType::Usb => {
+                                    crate::protocol::OutputReportBuilder::build_usb_reset_leds()
+                                        .to_vec()
+                                }
+                                ConnectionType::Bluetooth => {
+                                    let seq = bt_seq;
+                                    bt_seq = (bt_seq + 1) & 0x0F;
+                                    crate::protocol::OutputReportBuilder::build_bluetooth_reset_leds(
+                                        seq,
+                                    )
+                                    .to_vec()
+                                }
+                            };
+                            match device.write(&init_pkt) {
+                                Ok(written) => {
+                                    info!(
+                                        "DualSense one-shot LED reset handshake sent ({} bytes, transport={:?})",
+                                        written, connection
+                                    );
+                                    // Give firmware ~40ms before sending the first RGB + Trigger packet
+                                    last_send = std::time::Instant::now() + Duration::from_millis(20);
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "DualSense one-shot LED reset write returned error (transport={:?}, len={}B): {}",
+                                        connection,
+                                        init_pkt.len(),
+                                        e
+                                    );
+                                }
+                            }
+                        }
+
+                        // Send Output Report (Adaptive Triggers, Animated Lightbar, Player LEDs, Rumble) at 40Hz
+                        if is_ds
+                            && is_currently_connected
+                            && last_send.elapsed() >= Duration::from_millis(25)
+                        {
                             last_send = std::time::Instant::now();
                             let current_seq = bt_seq;
                             let elapsed_secs = worker_start.elapsed().as_secs_f32();
@@ -335,9 +378,14 @@ impl HidDeviceWorker {
                                 Ok(written) => {
                                     if state_changed {
                                         info!(
-                                            "DualSense HID write succeeded: {} bytes written (transport={:?}, valid_flag1=0x{:02x})",
+                                            "DualSense HID write succeeded: {} bytes written (transport={:?}, valid_flag0=0x{:02x}, valid_flag1=0x{:02x})",
                                             written,
                                             connection,
+                                            if connection == ConnectionType::Usb {
+                                                report[1]
+                                            } else {
+                                                report[3]
+                                            },
                                             if connection == ConnectionType::Usb {
                                                 report[2]
                                             } else {
@@ -350,9 +398,9 @@ impl HidDeviceWorker {
                                 }
                                 Err(e) => {
                                     write_error_count += 1;
-                                    if write_error_count <= 3 || write_error_count.is_multiple_of(100) {
+                                    if write_error_count <= 5 || write_error_count.is_multiple_of(100) {
                                         warn!(
-                                            "Failed to write {:?} output report (id=0x{:02x}, len={}B) to DualSense: {} (consecutive_errors={}). Pausing output writes temporarily.",
+                                            "Failed to write {:?} output report (id=0x{:02x}, len={}B) to DualSense: {} (consecutive_errors={}). Pausing output writes briefly.",
                                             connection,
                                             report[0],
                                             report.len(),
@@ -361,7 +409,7 @@ impl HidDeviceWorker {
                                         );
                                     }
                                     // Never disconnect the controller on write error! Input polling and gamepad emulation continue running.
-                                    last_send = std::time::Instant::now() + Duration::from_secs(2);
+                                    last_send = std::time::Instant::now() + Duration::from_millis(500);
                                 }
                             }
                         }

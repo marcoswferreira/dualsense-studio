@@ -120,7 +120,8 @@ impl TriggerEffect {
         }
     }
 
-    /// Compiles the trigger effect into the official 11-byte Sony DualSense HID payload
+    /// Compiles the trigger effect into the official 11-byte Sony DualSense firmware HID payload
+    /// (bit-packed zone masks per Sony SDK / Nielk1 `TriggerEffectGenerator` specification).
     pub fn compile_payload(&self) -> [u8; 11] {
         let mut bytes = [0u8; 11];
         match self {
@@ -131,19 +132,38 @@ impl TriggerEffect {
                 start_position,
                 force,
             } => {
+                if *force == 0 {
+                    bytes[0] = 0x05;
+                    return bytes;
+                }
+                let start = (*start_position).min(9);
+                let force_val = ((*force).clamp(1, 8) - 1) & 0x07;
+                let mut active_zones: u16 = 0;
+                let mut force_zones: u32 = 0;
+                for i in start..10 {
+                    active_zones |= 1u16 << i;
+                    force_zones |= (force_val as u32) << (3 * i);
+                }
                 bytes[0] = 0x21;
-                bytes[1] = (*start_position).min(9);
-                bytes[2] = (*force).min(8);
+                bytes[1..3].copy_from_slice(&active_zones.to_le_bytes());
+                bytes[3..7].copy_from_slice(&force_zones.to_le_bytes());
             }
             TriggerEffect::Weapon {
                 start_position,
                 end_position,
                 force,
             } => {
+                if *force == 0 {
+                    bytes[0] = 0x05;
+                    return bytes;
+                }
+                let start = (*start_position).min(8);
+                let end = (*end_position).clamp(start + 1, 9);
+                let start_and_stop: u16 = (1u16 << start) | (1u16 << end);
+                let force_val = ((*force).clamp(1, 8) - 1) & 0x07;
                 bytes[0] = 0x25;
-                bytes[1] = (*start_position).min(9);
-                bytes[2] = (*end_position).min(9);
-                bytes[3] = (*force).min(8);
+                bytes[1..3].copy_from_slice(&start_and_stop.to_le_bytes());
+                bytes[3] = force_val;
             }
             TriggerEffect::Bow {
                 start_position,
@@ -151,11 +171,14 @@ impl TriggerEffect {
                 force,
                 snap_force,
             } => {
+                let start = (*start_position).min(8);
+                let end = (*end_position).clamp(start + 1, 9);
+                let start_and_stop: u16 = (1u16 << start) | (1u16 << end);
+                let f = ((*force).clamp(1, 8) - 1) & 0x07;
+                let sf = ((*snap_force).clamp(1, 8) - 1) & 0x07;
                 bytes[0] = 0x22;
-                bytes[1] = (*start_position).min(9);
-                bytes[2] = (*end_position).min(9);
-                bytes[3] = (*force).min(8);
-                bytes[4] = (*snap_force).min(8);
+                bytes[1..3].copy_from_slice(&start_and_stop.to_le_bytes());
+                bytes[3] = (sf << 3) | f;
             }
             TriggerEffect::Galloping {
                 start_position,
@@ -164,12 +187,15 @@ impl TriggerEffect {
                 second_foot,
                 frequency,
             } => {
+                let start = (*start_position).min(8);
+                let end = (*end_position).clamp(start + 1, 9);
+                let start_and_stop: u16 = (1u16 << start) | (1u16 << end);
+                let ff = (*first_foot).min(6);
+                let sf = (*second_foot).clamp(ff + 1, 7);
                 bytes[0] = 0x23;
-                bytes[1] = (*start_position).min(9);
-                bytes[2] = (*end_position).min(9);
-                bytes[3] = (*first_foot).min(9);
-                bytes[4] = (*second_foot).min(9);
-                bytes[5] = *frequency;
+                bytes[1..3].copy_from_slice(&start_and_stop.to_le_bytes());
+                bytes[3] = (sf << 3) | ff;
+                bytes[4] = (*frequency).max(1);
             }
             TriggerEffect::MachineGun {
                 start_position,
@@ -177,11 +203,23 @@ impl TriggerEffect {
                 strength,
                 frequency,
             } => {
+                if *strength == 0 || *frequency == 0 {
+                    bytes[0] = 0x05;
+                    return bytes;
+                }
+                let start = (*start_position).min(9);
+                let end = (*end_position).clamp(start, 9);
+                let amp_val = ((*strength).clamp(1, 8) - 1) & 0x07;
+                let mut active_zones: u16 = 0;
+                let mut amp_zones: u32 = 0;
+                for i in start..=end {
+                    active_zones |= 1u16 << i;
+                    amp_zones |= (amp_val as u32) << (3 * i);
+                }
                 bytes[0] = 0x26;
-                bytes[1] = (*start_position).min(9);
-                bytes[2] = (*end_position).min(9);
-                bytes[3] = (*strength).min(8);
-                bytes[4] = *frequency;
+                bytes[1..3].copy_from_slice(&active_zones.to_le_bytes());
+                bytes[3..7].copy_from_slice(&amp_zones.to_le_bytes());
+                bytes[9] = *frequency;
             }
             TriggerEffect::Machine {
                 start_position,
@@ -191,23 +229,42 @@ impl TriggerEffect {
                 frequency,
                 period,
             } => {
+                let start = (*start_position).min(8);
+                let end = (*end_position).clamp(start + 1, 9);
+                let start_and_stop: u16 = (1u16 << start) | (1u16 << end);
+                let sa = (*strength_a).min(7);
+                let sb = (*strength_b).min(7);
                 bytes[0] = 0x27;
-                bytes[1] = (*start_position).min(9);
-                bytes[2] = (*end_position).min(9);
-                bytes[3] = (*strength_a).min(7);
-                bytes[4] = (*strength_b).min(7);
-                bytes[5] = *frequency;
-                bytes[6] = *period;
+                bytes[1..3].copy_from_slice(&start_and_stop.to_le_bytes());
+                bytes[3] = (sb << 3) | sa;
+                bytes[4] = (*frequency).max(1);
+                bytes[5] = *period;
             }
             TriggerEffect::Vibration {
                 position,
                 amplitude,
                 frequency,
             } => {
-                bytes[0] = 0x06;
-                bytes[1] = *frequency;
-                bytes[2] = (*amplitude).min(63);
-                bytes[3] = (*position).min(9);
+                if *amplitude == 0 || *frequency == 0 {
+                    bytes[0] = 0x05;
+                    return bytes;
+                }
+                let pos = (*position).min(9);
+                let amp_level = if *amplitude <= 8 {
+                    (*amplitude - 1) & 0x07
+                } else {
+                    (((*amplitude).min(63) as u16 * 7) / 63) as u8 & 0x07
+                };
+                let mut active_zones: u16 = 0;
+                let mut amp_zones: u32 = 0;
+                for i in pos..10 {
+                    active_zones |= 1u16 << i;
+                    amp_zones |= (amp_level as u32) << (3 * i);
+                }
+                bytes[0] = 0x26;
+                bytes[1..3].copy_from_slice(&active_zones.to_le_bytes());
+                bytes[3..7].copy_from_slice(&amp_zones.to_le_bytes());
+                bytes[9] = *frequency;
             }
             TriggerEffect::GameCube => {
                 bytes[0] = 0x02;
@@ -278,8 +335,26 @@ impl TriggerEffect {
                 bytes[6] = 0x23;
             }
             TriggerEffect::CustomZone { zones } => {
-                bytes[0] = 0x27;
-                bytes[1..11].copy_from_slice(zones);
+                let mut active_zones: u16 = 0;
+                let mut force_zones: u32 = 0;
+                for (i, &z) in zones.iter().enumerate() {
+                    if z > 0 {
+                        let level = if z <= 8 {
+                            (z - 1) & 0x07
+                        } else {
+                            (((z as u16) * 7) / 255) as u8 & 0x07
+                        };
+                        active_zones |= 1u16 << i;
+                        force_zones |= (level as u32) << (3 * i);
+                    }
+                }
+                if active_zones == 0 {
+                    bytes[0] = 0x05;
+                } else {
+                    bytes[0] = 0x21;
+                    bytes[1..3].copy_from_slice(&active_zones.to_le_bytes());
+                    bytes[3..7].copy_from_slice(&force_zones.to_le_bytes());
+                }
             }
         }
         bytes
@@ -320,9 +395,13 @@ mod tests {
         };
         let payload = effect.compile_payload();
         assert_eq!(payload[0], 0x21);
-        assert_eq!(payload[1], 2);
-        assert_eq!(payload[2], 7);
-        assert_eq!(&payload[3..], &[0, 0, 0, 0, 0, 0, 0, 0]);
+        // Active zones 2..10 = 0b11_1111_1100 = 0x03FC
+        let active_zones = u16::from_le_bytes([payload[1], payload[2]]);
+        assert_eq!(active_zones, 0x03FC);
+        let force_zones = u32::from_le_bytes([payload[3], payload[4], payload[5], payload[6]]);
+        // Force 7 encodes as 6 (0..7) in each active 3-bit slot
+        assert_eq!((force_zones >> 6) & 0x07, 6);
+        assert_eq!((force_zones >> 27) & 0x07, 6);
         assert_eq!(effect.name(), "Feedback/Resistance");
     }
 
@@ -335,9 +414,9 @@ mod tests {
         };
         let payload = effect.compile_payload();
         assert_eq!(payload[0], 0x25);
-        assert_eq!(payload[1], 1);
-        assert_eq!(payload[2], 6);
-        assert_eq!(payload[3], 8);
+        let mask = u16::from_le_bytes([payload[1], payload[2]]);
+        assert_eq!(mask, (1 << 1) | (1 << 6));
+        assert_eq!(payload[3], 7); // force 8 encodes as 7
         assert_eq!(effect.name(), "Weapon/SemiAutoGun");
     }
 
@@ -351,10 +430,10 @@ mod tests {
         };
         let payload = effect.compile_payload();
         assert_eq!(payload[0], 0x22);
-        assert_eq!(payload[1], 0);
-        assert_eq!(payload[2], 8);
-        assert_eq!(payload[3], 4);
-        assert_eq!(payload[4], 7);
+        let mask = u16::from_le_bytes([payload[1], payload[2]]);
+        assert_eq!(mask, (1 << 0) | (1 << 8));
+        // force=4 -> 3, snap_force=7 -> 6 => (6 << 3) | 3 = 0x33
+        assert_eq!(payload[3], (6 << 3) | 3);
         assert_eq!(effect.name(), "Bow");
     }
 
@@ -369,7 +448,12 @@ mod tests {
         };
         let p_gal = gal.compile_payload();
         assert_eq!(p_gal[0], 0x23);
-        assert_eq!(p_gal[5], 15);
+        assert_eq!(
+            u16::from_le_bytes([p_gal[1], p_gal[2]]),
+            (1 << 1) | (1 << 8)
+        );
+        assert_eq!(p_gal[3], (6 << 3) | 3);
+        assert_eq!(p_gal[4], 15);
         assert_eq!(gal.name(), "Galloping");
 
         let mach = TriggerEffect::Machine {
@@ -382,8 +466,13 @@ mod tests {
         };
         let p_mach = mach.compile_payload();
         assert_eq!(p_mach[0], 0x27);
-        assert_eq!(p_mach[5], 20);
-        assert_eq!(p_mach[6], 2);
+        assert_eq!(
+            u16::from_le_bytes([p_mach[1], p_mach[2]]),
+            (1 << 1) | (1 << 9)
+        );
+        assert_eq!(p_mach[3], (6 << 3) | 4);
+        assert_eq!(p_mach[4], 20);
+        assert_eq!(p_mach[5], 2);
         assert_eq!(mach.name(), "Machine");
     }
 
@@ -407,11 +496,14 @@ mod tests {
 
     #[test]
     fn test_trigger_custom_zone() {
-        let zones = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+        let zones = [1, 2, 3, 4, 5, 6, 7, 8, 8, 8];
         let effect = TriggerEffect::CustomZone { zones };
         let payload = effect.compile_payload();
-        assert_eq!(payload[0], 0x27);
-        assert_eq!(&payload[1..11], &zones);
+        assert_eq!(payload[0], 0x21);
+        assert_eq!(u16::from_le_bytes([payload[1], payload[2]]), 0x03FF);
+        let force_zones = u32::from_le_bytes([payload[3], payload[4], payload[5], payload[6]]);
+        assert_eq!(force_zones & 0x07, 0); // zone 0 = 1 -> 0
+        assert_eq!((force_zones >> 21) & 0x07, 7); // zone 7 = 8 -> 7
     }
 
     #[test]

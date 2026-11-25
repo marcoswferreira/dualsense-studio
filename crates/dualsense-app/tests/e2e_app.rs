@@ -157,12 +157,28 @@ async fn e2e_http_api_full_lifecycle() {
             .await
             .expect("start HTTP API server");
 
-    // 1. GET /api/dualsense/status
+    // 1. GET /api/dualsense/status & GET /api/dualsense/input
     let (code, body) = send_http_request(addr, "GET", "/api/dualsense/status", None).await;
     assert_eq!(code, 200);
     let status: DualSenseStatus = serde_json::from_str(&body).expect("parse DualSenseStatus");
     assert!(status.extension_enabled);
     assert!(status.connected);
+
+    let live_in = dualsense_core::DualSenseInputState {
+        left_stick_x: 220,
+        l2_trigger: 180,
+        cross: true,
+        ..Default::default()
+    };
+    manager.update_input_state(live_in);
+    let (code, input_body) = send_http_request(addr, "GET", "/api/dualsense/input", None).await;
+    assert_eq!(code, 200);
+    let input_val: serde_json::Value =
+        serde_json::from_str(&input_body).expect("parse live input JSON");
+    assert_eq!(input_val["connected"], true);
+    assert_eq!(input_val["input"]["left_stick_x"], 220);
+    assert_eq!(input_val["input"]["l2_trigger"], 180);
+    assert_eq!(input_val["input"]["cross"], true);
 
     // 2. POST /api/dualsense/trigger
     let trigger_json = r#"{

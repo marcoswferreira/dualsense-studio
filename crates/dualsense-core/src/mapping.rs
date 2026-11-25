@@ -470,7 +470,7 @@ mod tests {
         assert_eq!(rx, 255);
         assert_eq!(ry, 128);
 
-        // Axis inversion
+        // Axis inversion (cardinal axes avoid circular magnitude clamping of diagonals)
         let inv = StickTuning {
             inner_deadzone: 0.0,
             outer_deadzone: 1.0,
@@ -478,7 +478,8 @@ mod tests {
             invert_y: true,
             ..Default::default()
         };
-        let (ix, iy) = transform_stick_pair(255, 0, &inv);
+        let (ix, _) = transform_stick_pair(255, 128, &inv);
+        let (_, iy) = transform_stick_pair(128, 0, &inv);
         assert!(ix <= 2);
         assert!(iy >= 253);
     }

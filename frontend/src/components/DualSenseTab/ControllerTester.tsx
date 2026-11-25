@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Activity, Gamepad2, Plug, Unplug, Vibrate, Zap } from 'lucide-react';
 import { useTranslation } from '../../i18n';
 import {
+  backendInputToLiveGamepad,
+  BackendInputResponse,
   pollStandardGamepad,
   triggerHapticRumble,
   webHidController,
@@ -12,6 +14,7 @@ import {
 interface Props {
   onShowToast?: (message: string) => void;
   isHardwareConnected?: boolean;
+  isBackendConnected?: boolean;
   controllerName?: string;
   onBackendRumble?: () => void;
 }
@@ -55,19 +58,22 @@ const StickReticle: React.FC<{ label: string; x: number; y: number; clicked: boo
 export const ControllerTester: React.FC<Props> = ({
   onShowToast,
   isHardwareConnected = false,
+  isBackendConnected = false,
   controllerName,
   onBackendRumble,
 }) => {
   const { t, lang } = useTranslation();
-  const [liveGamepad, setLiveGamepad] = useState<LiveGamepadState | null>(null);
+  const [browserGamepad, setBrowserGamepad] = useState<LiveGamepadState | null>(null);
+  const [backendGamepad, setBackendGamepad] = useState<LiveGamepadState | null>(null);
   const [isWebHidConnected, setIsWebHidConnected] = useState(webHidController.isConnected());
   const [webHidName, setWebHidName] = useState(webHidController.getDeviceName());
   const isWebHidAvailable = WebHidDualSenseController.isSupported();
 
+  // Poll Browser Gamepad API via requestAnimationFrame
   useEffect(() => {
     let animId: number;
     const poll = () => {
-      setLiveGamepad(pollStandardGamepad());
+      setBrowserGamepad(pollStandardGamepad());
       setIsWebHidConnected(webHidController.isConnected());
       setWebHidName(webHidController.getDeviceName());
       animId = requestAnimationFrame(poll);
@@ -75,6 +81,41 @@ export const ControllerTester: React.FC<Props> = ({
     animId = requestAnimationFrame(poll);
     return () => cancelAnimationFrame(animId);
   }, []);
+
+  // Poll live physical HID telemetry directly from Rust backend (/api/dualsense/input) at ~25 Hz
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+
+    const pollBackend = async () => {
+      if (inFlight || cancelled) return;
+      inFlight = true;
+      try {
+        const res = await fetch('/api/dualsense/input');
+        if (res.ok && !cancelled) {
+          const data: BackendInputResponse = await res.json();
+          if (data.connected) {
+            setBackendGamepad(backendInputToLiveGamepad(data));
+          } else {
+            setBackendGamepad(null);
+          }
+        }
+      } catch {
+        if (!cancelled) setBackendGamepad(null);
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void pollBackend();
+    const timer = window.setInterval(() => void pollBackend(), 40);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const liveGamepad = backendGamepad ?? browserGamepad;
 
   const handleConnectWebHid = async () => {
     const ok = await webHidController.connect();
@@ -94,6 +135,11 @@ export const ControllerTester: React.FC<Props> = ({
   };
 
   const handleTestRumble = async () => {
+    // Prefer direct Rust backend HID rumble when the physical DualSense is connected
+    if (isBackendConnected && onBackendRumble) {
+      onBackendRumble();
+      return;
+    }
     const ok = await triggerHapticRumble(450, 0.85, 0.85);
     if (ok) {
       onShowToast?.(t('toast_rumble_tested'));
@@ -138,11 +184,13 @@ export const ControllerTester: React.FC<Props> = ({
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <span className={`chip ${liveGamepad?.connected || isHardwareConnected ? 'success' : 'warn'}`}>
             <Activity size={12} />
-            {liveGamepad?.connected
-              ? `Gamepad API: ${liveGamepad.id}`
-              : isHardwareConnected
-                ? `${controllerName || 'DualSense'} (${lang === 'pt' ? 'Pressione qualquer botão' : 'Press any button'})`
-                : t('dualsense_tester_no_gamepad')}
+            {backendGamepad?.connected
+              ? `Live HID: ${backendGamepad.id}`
+              : browserGamepad?.connected
+                ? `Gamepad API: ${browserGamepad.id}`
+                : isHardwareConnected
+                  ? `${controllerName || 'DualSense'} (${lang === 'pt' ? 'Conectado' : 'Connected'})`
+                  : t('dualsense_tester_no_gamepad')}
           </span>
           <span className={`chip ${isWebHidConnected ? 'accent' : ''}`}>
             <Zap size={12} />

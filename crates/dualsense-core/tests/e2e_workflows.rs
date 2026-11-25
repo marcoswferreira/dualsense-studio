@@ -215,10 +215,12 @@ async fn e2e_udp_datagram_to_hid_output_report_pipeline() {
     assert_eq!(usb[2] & 0x08, 0, "RELEASE_LEDS bit must stay clear");
     assert_eq!(usb[3], 95); // light rumble
     assert_eq!(usb[4], 210); // heavy rumble
-    assert_eq!(usb[11], 0x25); // R2 Weapon
-    assert_eq!(usb[12..15], [2, 6, 7]);
-    assert_eq!(usb[22], 0x22); // L2 Bow
-    assert_eq!(usb[23..27], [1, 7, 4, 8]);
+    assert_eq!(usb[11], 0x25); // R2 Weapon(start=2, end=6, force=7 -> force_val=6)
+    assert_eq!(LittleEndian::read_u16(&usb[12..14]), (1 << 2) | (1 << 6));
+    assert_eq!(usb[14], 6);
+    assert_eq!(usb[22], 0x22); // L2 Bow(start=1, end=7, force=4->3, snap=8->7)
+    assert_eq!(LittleEndian::read_u16(&usb[23..25]), (1 << 1) | (1 << 7));
+    assert_eq!(usb[25], (7 << 3) | 3);
     assert_eq!(usb[45..48], [255, 100, 25]); // RGB
 
     let bt = builder.build_bluetooth();

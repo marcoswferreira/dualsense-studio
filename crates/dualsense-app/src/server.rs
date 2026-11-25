@@ -210,6 +210,14 @@ async fn route_request(
             let status = manager.get_status().await;
             json_response(200, "OK", &status)
         }
+        ("GET", "/api/dualsense/input") => {
+            let payload = json!({
+                "connected": manager.is_connected(),
+                "name": manager.controller_name(),
+                "input": manager.get_input_state(),
+            });
+            json_response(200, "OK", &payload)
+        }
         ("POST", "/api/dualsense/trigger") => {
             match serde_json::from_slice::<DualTriggerConfig>(body) {
                 Ok(triggers) => {

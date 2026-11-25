@@ -237,41 +237,140 @@ pub fn encode_dualsense_usb_input_report(state: &DualSenseInputState, seq: u8) -
     raw
 }
 
-/// Decodes an 11-byte Sony DualSense adaptive trigger payload back into `TriggerEffect`
+/// Helper to decode bit-packed start & stop positions from a 10-bit `start_and_stop` mask
+fn decode_start_stop_mask(mask: u16) -> (u8, u8) {
+    let mut start = None;
+    let mut end = 9u8;
+    for i in 0u8..10 {
+        if (mask & (1u16 << i)) != 0 {
+            if start.is_none() {
+                start = Some(i);
+            } else {
+                end = i;
+            }
+        }
+    }
+    let s = start.unwrap_or(0);
+    (s, end.max(s))
+}
+
+/// Decodes an 11-byte Sony DualSense adaptive trigger payload (Nielk1 bit-packed & legacy)
+/// back into `TriggerEffect`
 pub fn decode_trigger_payload(bytes: &[u8]) -> TriggerEffect {
     if bytes.len() < 11 {
         return TriggerEffect::Off;
     }
     match bytes[0] {
         0x00 | 0x05 => TriggerEffect::Off,
-        0x21 => TriggerEffect::Feedback {
-            start_position: bytes[1].min(9),
-            force: bytes[2].min(8),
-        },
-        0x22 => TriggerEffect::Bow {
-            start_position: bytes[1].min(9),
-            end_position: bytes[2].min(9),
-            force: bytes[3].min(8),
-            snap_force: bytes[4].min(8),
-        },
-        0x23 => TriggerEffect::Galloping {
-            start_position: bytes[1].min(9),
-            end_position: bytes[2].min(9),
-            first_foot: bytes[3].min(9),
-            second_foot: bytes[4].min(9),
-            frequency: bytes[5],
-        },
-        0x25 => TriggerEffect::Weapon {
-            start_position: bytes[1].min(9),
-            end_position: bytes[2].min(9),
-            force: bytes[3].min(8),
-        },
-        0x26 => TriggerEffect::MachineGun {
-            start_position: bytes[1].min(9),
-            end_position: bytes[2].min(9),
-            strength: bytes[3].min(8),
-            frequency: bytes[4],
-        },
+        0x21 => {
+            let active_zones = LittleEndian::read_u16(&bytes[1..3]);
+            let force_zones = LittleEndian::read_u32(&bytes[3..7]);
+            if active_zones == 0 {
+                return TriggerEffect::Off;
+            }
+            let first = (0u8..10)
+                .find(|&i| (active_zones & (1u16 << i)) != 0)
+                .unwrap_or(0);
+            let first_force = (((force_zones >> (3 * first)) & 0x07) as u8) + 1;
+            // Check whether all zones from `first..10` share the same uniform force (Feedback)
+            let is_uniform_feedback = (first..10).all(|i| {
+                (active_zones & (1u16 << i)) != 0
+                    && (((force_zones >> (3 * i)) & 0x07) as u8 + 1) == first_force
+            });
+            if is_uniform_feedback {
+                TriggerEffect::Feedback {
+                    start_position: first,
+                    force: first_force,
+                }
+            } else {
+                let mut zones = [0u8; 10];
+                for (i, z) in zones.iter_mut().enumerate() {
+                    if (active_zones & (1u16 << i)) != 0 {
+                        *z = (((force_zones >> (3 * i)) & 0x07) as u8) + 1;
+                    }
+                }
+                TriggerEffect::CustomZone { zones }
+            }
+        }
+        0x22 => {
+            let (start_position, end_position) =
+                decode_start_stop_mask(LittleEndian::read_u16(&bytes[1..3]));
+            let force = (bytes[3] & 0x07) + 1;
+            let snap_force = ((bytes[3] >> 3) & 0x07) + 1;
+            TriggerEffect::Bow {
+                start_position,
+                end_position,
+                force,
+                snap_force,
+            }
+        }
+        0x23 => {
+            let (start_position, end_position) =
+                decode_start_stop_mask(LittleEndian::read_u16(&bytes[1..3]));
+            let first_foot = bytes[3] & 0x07;
+            let second_foot = (bytes[3] >> 3) & 0x07;
+            TriggerEffect::Galloping {
+                start_position,
+                end_position,
+                first_foot,
+                second_foot,
+                frequency: bytes[4],
+            }
+        }
+        0x25 => {
+            let (start_position, end_position) =
+                decode_start_stop_mask(LittleEndian::read_u16(&bytes[1..3]));
+            let force = (bytes[3] & 0x07) + 1;
+            TriggerEffect::Weapon {
+                start_position,
+                end_position,
+                force,
+            }
+        }
+        0x26 => {
+            let active_zones = LittleEndian::read_u16(&bytes[1..3]);
+            let amp_zones = LittleEndian::read_u32(&bytes[3..7]);
+            let frequency = bytes[9];
+            if active_zones == 0 || frequency == 0 {
+                return TriggerEffect::Off;
+            }
+            let start_position = (0u8..10)
+                .find(|&i| (active_zones & (1u16 << i)) != 0)
+                .unwrap_or(0);
+            let end_position = (0u8..10)
+                .rev()
+                .find(|&i| (active_zones & (1u16 << i)) != 0)
+                .unwrap_or(9);
+            let strength = (((amp_zones >> (3 * start_position)) & 0x07) as u8) + 1;
+            if end_position == 9 {
+                TriggerEffect::Vibration {
+                    position: start_position,
+                    amplitude: strength,
+                    frequency,
+                }
+            } else {
+                TriggerEffect::MachineGun {
+                    start_position,
+                    end_position,
+                    strength,
+                    frequency,
+                }
+            }
+        }
+        0x27 => {
+            let (start_position, end_position) =
+                decode_start_stop_mask(LittleEndian::read_u16(&bytes[1..3]));
+            let strength_a = bytes[3] & 0x07;
+            let strength_b = (bytes[3] >> 3) & 0x07;
+            TriggerEffect::Machine {
+                start_position,
+                end_position,
+                strength_a,
+                strength_b,
+                frequency: bytes[4],
+                period: bytes[5],
+            }
+        }
         0x06 => TriggerEffect::Vibration {
             frequency: bytes[1],
             amplitude: bytes[2].min(63),
@@ -284,33 +383,22 @@ pub fn decode_trigger_payload(bytes: &[u8]) -> TriggerEffect {
             (0x10, 0xFF, 0x00) => TriggerEffect::VeryHard,
             (0x00, 0xFF, 0xFF) => TriggerEffect::Hardest,
             (0x00, 0xFF, 0x00) => TriggerEffect::Rigid,
-            _ => {
-                // Standard continuous resistance (opcode 0x01: start 0..255, force 0..255)
-                TriggerEffect::Feedback {
-                    start_position: ((bytes[1] as u16 * 9) / 255) as u8,
-                    force: ((bytes[2] as u16 * 8) / 255) as u8,
-                }
-            }
+            _ => TriggerEffect::Feedback {
+                start_position: ((bytes[1] as u16 * 9) / 255) as u8,
+                force: ((bytes[2] as u16 * 8) / 255) as u8,
+            },
         },
         0x02 => match (bytes[1], bytes[2], bytes[3]) {
             (0x90, 0xA0, 0xFF) => TriggerEffect::GameCube,
             (0x02, 0x27, 0x03) => TriggerEffect::Choppy,
             (0x02, 0x01, 0x02) => TriggerEffect::Medium,
             (0x25, 0x06, 0x02) => TriggerEffect::VibrateTriggerPulse,
-            _ => {
-                // Section resistance (opcode 0x02: start, end, force)
-                TriggerEffect::Weapon {
-                    start_position: ((bytes[1] as u16 * 9) / 255) as u8,
-                    end_position: ((bytes[2] as u16 * 9) / 255) as u8,
-                    force: ((bytes[3] as u16 * 8) / 255) as u8,
-                }
-            }
+            _ => TriggerEffect::Weapon {
+                start_position: ((bytes[1] as u16 * 9) / 255) as u8,
+                end_position: ((bytes[2] as u16 * 9) / 255) as u8,
+                force: ((bytes[3] as u16 * 8) / 255) as u8,
+            },
         },
-        0x27 => {
-            let mut zones = [0u8; 10];
-            zones.copy_from_slice(&bytes[1..11]);
-            TriggerEffect::CustomZone { zones }
-        }
         _ => TriggerEffect::Off,
     }
 }

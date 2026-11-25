@@ -474,6 +474,7 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
                   <ControllerTester
                     onShowToast={onShowToast}
                     isHardwareConnected={isHardwareConnected}
+                    isBackendConnected={currentStatus.connected}
                     controllerName={displayControllerName}
                     onBackendRumble={() =>
                       void postJson(

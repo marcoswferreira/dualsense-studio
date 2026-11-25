@@ -29,8 +29,9 @@ fn allocate_free_udp_port() -> u16 {
     socket.local_addr().expect("read local addr").port()
 }
 
-/// REG-01 & REG-02: Firmware LED lock-out guard (`RELEASE_LEDS` 0x08 must never be set)
-/// and lightbar setup flags must stay at exact Sony HID offsets on both USB and Bluetooth.
+/// REG-01 & REG-02: Firmware LED lock-out guard (`RELEASE_LEDS` 0x08 must never be set),
+/// continuous `LIGHT_OUT` bug guard (`valid_flag2` and `lightbar_setup` must be 0x00 on normal
+/// reports so LEDs stay lit), and 48-byte Windows-compatible USB output report length.
 #[test]
 fn regression_output_reports_never_set_release_leds_and_preserve_setup_flags() {
     let player_leds = [
@@ -52,16 +53,26 @@ fn regression_output_reports_never_set_release_leds_and_preserve_setup_flags() {
                 .with_rumble(255, 128);
 
             let usb = builder.build_usb();
+            assert_eq!(usb.len(), 48, "USB output report must be exactly 48 bytes");
             assert_eq!(usb[0], 0x02);
-            assert_eq!(usb[1], 0xFF);
+            assert_eq!(
+                usb[1], 0x0F,
+                "USB valid_flag0 must only enable rumble + triggers"
+            );
             assert_eq!(usb[2], 0x15);
             assert_eq!(
                 usb[2] & 0x08,
                 0,
                 "USB valid_flag1 must never set RELEASE_LEDS (0x08)"
             );
-            assert_eq!(usb[39], 0x02, "USB valid_flag2 lightbar setup enable");
-            assert_eq!(usb[42], 0x02, "USB lightbar_setup LIGHT_OUT");
+            assert_eq!(
+                usb[39], 0x00,
+                "USB valid_flag2 must stay 0x00 on normal reports so LIGHT_OUT never turns off LEDs"
+            );
+            assert_eq!(
+                usb[42], 0x00,
+                "USB lightbar_setup must stay 0x00 on normal reports"
+            );
             assert_eq!(usb[43], 0x00, "USB led_brightness high");
             assert_eq!(usb[44], player_led.to_bitmask());
             assert_eq!(usb[9], mic_led.to_byte());
@@ -69,20 +80,40 @@ fn regression_output_reports_never_set_release_leds_and_preserve_setup_flags() {
             let bt = builder.build_bluetooth();
             assert_eq!(bt[0], 0x31);
             assert_eq!(bt[2], 0x10);
-            assert_eq!(bt[3], 0xFF);
+            assert_eq!(
+                bt[3], 0x0F,
+                "BT valid_flag0 must only enable rumble + triggers"
+            );
             assert_eq!(bt[4], 0x15);
             assert_eq!(
                 bt[4] & 0x08,
                 0,
                 "BT valid_flag1 must never set RELEASE_LEDS (0x08)"
             );
-            assert_eq!(bt[41], 0x02, "BT valid_flag2 lightbar setup enable");
-            assert_eq!(bt[44], 0x02, "BT lightbar_setup LIGHT_OUT");
+            assert_eq!(
+                bt[41], 0x00,
+                "BT valid_flag2 must stay 0x00 on normal reports so LIGHT_OUT never turns off LEDs"
+            );
+            assert_eq!(
+                bt[44], 0x00,
+                "BT lightbar_setup must stay 0x00 on normal reports"
+            );
             assert_eq!(bt[45], 0x00, "BT led_brightness high");
             assert_eq!(bt[46], player_led.to_bitmask());
             assert_eq!(bt[11], mic_led.to_byte());
         }
     }
+
+    // One-shot LED reset handshake reports must set LIGHT_OUT (0x02) cleanly
+    let usb_reset = OutputReportBuilder::build_usb_reset_leds();
+    assert_eq!(usb_reset.len(), 48);
+    assert_eq!(usb_reset[39], 0x02);
+    assert_eq!(usb_reset[42], 0x02);
+
+    let bt_reset = OutputReportBuilder::build_bluetooth_reset_leds(4);
+    assert_eq!(bt_reset[0], 0x31);
+    assert_eq!(bt_reset[41], 0x02);
+    assert_eq!(bt_reset[44], 0x02);
 }
 
 /// REG-03: Bluetooth 0x31 sequence masking (0..15) and Sony HID CRC32 (0xA2 seed) across all u8 seq values.
@@ -111,18 +142,18 @@ fn regression_bluetooth_sequence_masking_and_crc32_all_values() {
     }
 }
 
-/// REG-04: Adaptive trigger clamping bounds, opcode stability, and serde backward-compatible aliases.
+/// REG-04: Adaptive trigger clamping bounds, Sony/Nielk1 bit-packed opcodes, and serde aliases.
 #[test]
 fn regression_trigger_effect_clamping_and_serde_aliases() {
-    // Out-of-range inputs must clamp to firmware-safe maxima
+    // Out-of-range inputs must clamp to firmware-safe maxima and bit-pack properly
     let fb = TriggerEffect::Feedback {
         start_position: 255,
         force: 255,
     }
     .compile_payload();
     assert_eq!(fb[0], 0x21);
-    assert_eq!(fb[1], 9);
-    assert_eq!(fb[2], 8);
+    assert_eq!(LittleEndian::read_u16(&fb[1..3]), 1 << 9); // zone 9 active
+    assert_eq!((LittleEndian::read_u32(&fb[3..7]) >> 27) & 0x07, 7); // max force 8 -> 7
 
     let wp = TriggerEffect::Weapon {
         start_position: 99,
@@ -131,9 +162,8 @@ fn regression_trigger_effect_clamping_and_serde_aliases() {
     }
     .compile_payload();
     assert_eq!(wp[0], 0x25);
-    assert_eq!(wp[1], 9);
-    assert_eq!(wp[2], 9);
-    assert_eq!(wp[3], 8);
+    assert_eq!(LittleEndian::read_u16(&wp[1..3]), (1 << 8) | (1 << 9));
+    assert_eq!(wp[3], 7);
 
     let bow = TriggerEffect::Bow {
         start_position: 20,
@@ -143,7 +173,8 @@ fn regression_trigger_effect_clamping_and_serde_aliases() {
     }
     .compile_payload();
     assert_eq!(bow[0], 0x22);
-    assert_eq!(bow[1..5], [9, 9, 8, 8]);
+    assert_eq!(LittleEndian::read_u16(&bow[1..3]), (1 << 8) | (1 << 9));
+    assert_eq!(bow[3], (7 << 3) | 7);
 
     let gal = TriggerEffect::Galloping {
         start_position: 15,
@@ -154,7 +185,9 @@ fn regression_trigger_effect_clamping_and_serde_aliases() {
     }
     .compile_payload();
     assert_eq!(gal[0], 0x23);
-    assert_eq!(gal[1..6], [9, 9, 9, 9, 250]);
+    assert_eq!(LittleEndian::read_u16(&gal[1..3]), (1 << 8) | (1 << 9));
+    assert_eq!(gal[3], (7 << 3) | 6);
+    assert_eq!(gal[4], 250);
 
     let mg = TriggerEffect::MachineGun {
         start_position: 12,
@@ -164,7 +197,9 @@ fn regression_trigger_effect_clamping_and_serde_aliases() {
     }
     .compile_payload();
     assert_eq!(mg[0], 0x26);
-    assert_eq!(mg[1..5], [9, 9, 8, 120]);
+    assert_eq!(LittleEndian::read_u16(&mg[1..3]), 1 << 9);
+    assert_eq!((LittleEndian::read_u32(&mg[3..7]) >> 27) & 0x07, 7);
+    assert_eq!(mg[9], 120);
 
     let mach = TriggerEffect::Machine {
         start_position: 12,
@@ -176,7 +211,10 @@ fn regression_trigger_effect_clamping_and_serde_aliases() {
     }
     .compile_payload();
     assert_eq!(mach[0], 0x27);
-    assert_eq!(mach[1..7], [9, 9, 7, 7, 40, 5]);
+    assert_eq!(LittleEndian::read_u16(&mach[1..3]), (1 << 8) | (1 << 9));
+    assert_eq!(mach[3], (7 << 3) | 7);
+    assert_eq!(mach[4], 40);
+    assert_eq!(mach[5], 5);
 
     let vib = TriggerEffect::Vibration {
         position: 50,
@@ -184,10 +222,10 @@ fn regression_trigger_effect_clamping_and_serde_aliases() {
         frequency: 180,
     }
     .compile_payload();
-    assert_eq!(vib[0], 0x06);
-    assert_eq!(vib[1], 180);
-    assert_eq!(vib[2], 63); // amplitude clamped to 63
-    assert_eq!(vib[3], 9); // position clamped to 9
+    assert_eq!(vib[0], 0x26);
+    assert_eq!(LittleEndian::read_u16(&vib[1..3]), 1 << 9);
+    assert_eq!((LittleEndian::read_u32(&vib[3..7]) >> 27) & 0x07, 7);
+    assert_eq!(vib[9], 180);
 
     // Serde legacy / DualSenseX aliases must continue to deserialize cleanly
     let alias_cases: [(&str, TriggerEffect); 6] = [
@@ -1002,7 +1040,7 @@ fn regression_animated_lightbar_40hz_and_virtual_dualsense_reverse_decoder() {
         },
         TriggerEffect::Vibration {
             position: 3,
-            amplitude: 12,
+            amplitude: 6,
             frequency: 25,
         },
         TriggerEffect::GameCube,

@@ -9,7 +9,7 @@ pub const SONY_VENDOR_ID: u16 = 0x054C;
 pub const DUALSENSE_PID: u16 = 0x0CE6;
 pub const DUALSENSE_EDGE_PID: u16 = 0x0DF2;
 
-pub const USB_OUTPUT_REPORT_SIZE: usize = 64;
+pub const USB_OUTPUT_REPORT_SIZE: usize = 48;
 pub const BT_OUTPUT_REPORT_SIZE: usize = 78;
 pub const BT_HAPTICS_REPORT_SIZE: usize = 142;
 
@@ -171,13 +171,14 @@ impl OutputReportBuilder {
         self
     }
 
-    /// Builds a 64-byte USB Output Report (Report ID 0x02)
+    /// Builds a 48-byte USB Output Report (Report ID 0x02)
     pub fn build_usb(&self) -> [u8; USB_OUTPUT_REPORT_SIZE] {
         let mut report = [0u8; USB_OUTPUT_REPORT_SIZE];
         report[0] = 0x02; // Report ID
 
-        // valid_flag0: Enable compatible rumble (0x01 | 0x02), triggers (0x04 | 0x08)
-        report[1] = 0xFF;
+        // valid_flag0: Enable compatible rumble (0x01 | 0x02) and adaptive triggers (0x04 | 0x08).
+        // Do NOT set upper audio/volume bits (0x10..0x80) with zeroed bytes, as that mutes audio.
+        report[1] = 0x0F;
 
         // valid_flag1: Enable mic mute led (0x01), lightbar (0x04), player leds (0x10).
         // IMPORTANT: Bit 0x08 (DS_OUTPUT_VALID_FLAG1_RELEASE_LEDS) MUST NOT be set,
@@ -199,11 +200,13 @@ impl OutputReportBuilder {
         let lt = self.triggers.left.compile_payload();
         report[22..33].copy_from_slice(&lt);
 
-        // valid_flag2: Enable lightbar setup (DS_OUTPUT_VALID_FLAG2_LIGHTBAR_SETUP_CONTROL_ENABLE)
-        report[39] = 0x02;
+        // valid_flag2: MUST be 0x00 during normal updates.
+        // Setting 0x02 (LIGHTBAR_SETUP_CONTROL_ENABLE) with lightbar_setup = 0x02 (LIGHT_OUT)
+        // on every packet causes the firmware to continuously fade out and turn OFF all LEDs!
+        report[39] = 0x00;
 
-        // lightbar_setup: 0x02 = DS_OUTPUT_LIGHTBAR_SETUP_LIGHT_OUT (clears default fade-in so RGB takes over)
-        report[42] = 0x02;
+        // lightbar_setup: 0x00 (normal RGB operation; LIGHT_OUT is only sent once on connect)
+        report[42] = 0x00;
 
         // led_brightness: 0x00 = High brightness
         report[43] = 0x00;
@@ -219,6 +222,17 @@ impl OutputReportBuilder {
         report
     }
 
+    /// Builds a one-shot 48-byte USB LED reset report (`DS_OUTPUT_LIGHTBAR_SETUP_LIGHT_OUT`)
+    /// matching Linux `hid-playstation.c::dualsense_reset_leds()`. Must be sent ONCE on connect
+    /// to end the controller's default startup animation so host RGB takes over.
+    pub fn build_usb_reset_leds() -> [u8; USB_OUTPUT_REPORT_SIZE] {
+        let mut report = [0u8; USB_OUTPUT_REPORT_SIZE];
+        report[0] = 0x02;
+        report[39] = 0x02; // DS_OUTPUT_VALID_FLAG2_LIGHTBAR_SETUP_CONTROL_ENABLE
+        report[42] = 0x02; // DS_OUTPUT_LIGHTBAR_SETUP_LIGHT_OUT
+        report
+    }
+
     /// Builds a 78-byte Bluetooth Output Report (Report ID 0x31) with CRC32
     pub fn build_bluetooth(&self) -> [u8; BT_OUTPUT_REPORT_SIZE] {
         let mut report = [0u8; BT_OUTPUT_REPORT_SIZE];
@@ -229,7 +243,8 @@ impl OutputReportBuilder {
 
         // valid_flag0: When bt_hd_haptics is active, keep legacy rumble flags (0x01|0x02) clear
         // so DualSense voice coils stay in full-power HD audio mode for Report 0x32 while triggers (0x0C) remain active.
-        report[3] = if self.bt_hd_haptics { 0x0C } else { 0xFF };
+        // Never set upper audio/volume flags (0x10..0x80) with zeroed bytes.
+        report[3] = if self.bt_hd_haptics { 0x0C } else { 0x0F };
 
         // valid_flag1: Enable mic led (0x01), lightbar (0x04), player leds (0x10).
         // When bt_hd_haptics is active, also enable LPF & haptic power control (0x02 | 0x20 | 0x40).
@@ -263,11 +278,12 @@ impl OutputReportBuilder {
         let lt = self.triggers.left.compile_payload();
         report[24..35].copy_from_slice(&lt);
 
-        // valid_flag2: Enable lightbar setup (common[38] is at index 3 + 38 = 41)
-        report[41] = 0x02;
+        // valid_flag2: MUST be 0x00 during normal updates (common[38] is at index 3 + 38 = 41).
+        // Continuous LIGHT_OUT extinguishes all LEDs.
+        report[41] = 0x00;
 
-        // lightbar_setup: 0x02 = DS_OUTPUT_LIGHTBAR_SETUP_LIGHT_OUT (common[41] is at index 3 + 41 = 44)
-        report[44] = 0x02;
+        // lightbar_setup: 0x00 (common[41] is at index 3 + 41 = 44)
+        report[44] = 0x00;
 
         // led_brightness: 0x00 = High brightness (common[42] is at index 3 + 42 = 45)
         report[45] = 0x00;
@@ -287,6 +303,23 @@ impl OutputReportBuilder {
         let checksum = hasher.finalize();
 
         LittleEndian::write_u32(&mut report[74..78], checksum);
+        report
+    }
+
+    /// Builds a one-shot 78-byte Bluetooth LED reset report (`DS_OUTPUT_LIGHTBAR_SETUP_LIGHT_OUT`)
+    /// with CRC32, matching Linux `hid-playstation.c::dualsense_reset_leds()`.
+    pub fn build_bluetooth_reset_leds(seq_num: u8) -> [u8; BT_OUTPUT_REPORT_SIZE] {
+        let mut report = [0u8; BT_OUTPUT_REPORT_SIZE];
+        report[0] = 0x31;
+        report[1] = ((seq_num & 0x0F) << 4) | 0x02;
+        report[2] = 0x10;
+        report[41] = 0x02; // DS_OUTPUT_VALID_FLAG2_LIGHTBAR_SETUP_CONTROL_ENABLE
+        report[44] = 0x02; // DS_OUTPUT_LIGHTBAR_SETUP_LIGHT_OUT
+
+        let mut hasher = Hasher::new();
+        hasher.update(&[0xA2]);
+        hasher.update(&report[0..74]);
+        LittleEndian::write_u32(&mut report[74..78], hasher.finalize());
         report
     }
 }
@@ -596,27 +629,35 @@ mod tests {
             });
 
         let usb = builder.build_usb();
+        assert_eq!(usb.len(), 48);
         assert_eq!(usb[0], 0x02);
-        assert_eq!(usb[1], 0xFF);
+        assert_eq!(usb[1], 0x0F);
         assert_eq!(usb[2], 0x15);
         assert_eq!(usb[2] & 0x08, 0); // RELEASE_LEDS must NOT be set
         assert_eq!(usb[9], 0x01);
-        assert_eq!(usb[39], 0x02);
-        assert_eq!(usb[42], 0x02);
+        assert_eq!(usb[39], 0x00); // Normal reports must NOT repeat LIGHT_OUT
+        assert_eq!(usb[42], 0x00);
         assert_eq!(usb[43], 0x00);
         assert_eq!(usb[44], 0x0A);
         assert_eq!(usb[45], 255);
         assert_eq!(usb[46], 0);
         assert_eq!(usb[47], 0);
 
-        assert_eq!(usb[11], 0x25); // Weapon mode is 0x25
-        assert_eq!(usb[12], 2);
-        assert_eq!(usb[13], 6);
-        assert_eq!(usb[14], 7);
+        // R2 Weapon(start=2, end=6, force=7 -> bitmask (1<<2)|(1<<6)=0x0044, force_val=6)
+        assert_eq!(usb[11], 0x25);
+        assert_eq!(LittleEndian::read_u16(&usb[12..14]), (1 << 2) | (1 << 6));
+        assert_eq!(usb[14], 6);
 
-        assert_eq!(usb[22], 0x21); // Feedback mode is 0x21
-        assert_eq!(usb[23], 1);
-        assert_eq!(usb[24], 5);
+        // L2 Feedback(start=1, force=5 -> active_zones=0x03FE, force_val=4 in zones 1..10)
+        assert_eq!(usb[22], 0x21);
+        assert_eq!(LittleEndian::read_u16(&usb[23..25]), 0x03FE);
+        assert_ne!(LittleEndian::read_u32(&usb[25..29]), 0);
+
+        // One-shot LED reset handshake sets LIGHT_OUT explicitly
+        let reset_usb = OutputReportBuilder::build_usb_reset_leds();
+        assert_eq!(reset_usb[0], 0x02);
+        assert_eq!(reset_usb[39], 0x02);
+        assert_eq!(reset_usb[42], 0x02);
     }
 
     #[test]
@@ -630,10 +671,11 @@ mod tests {
         assert_eq!(bt[0], 0x31);
         assert_eq!(bt[1], 0x32);
         assert_eq!(bt[2], 0x10);
+        assert_eq!(bt[3], 0x0F);
         assert_eq!(bt[4], 0x15);
         assert_eq!(bt[4] & 0x08, 0); // RELEASE_LEDS must NOT be set
-        assert_eq!(bt[41], 0x02);
-        assert_eq!(bt[44], 0x02);
+        assert_eq!(bt[41], 0x00); // Normal reports must NOT repeat LIGHT_OUT
+        assert_eq!(bt[44], 0x00);
         assert_eq!(bt[46], 0x04);
         assert_eq!(bt[48], 255);
 
@@ -644,6 +686,17 @@ mod tests {
         hasher.update(&[0xA2]);
         hasher.update(&bt[0..74]);
         assert_eq!(hasher.finalize(), crc);
+
+        // One-shot Bluetooth LED reset handshake with valid CRC32
+        let reset_bt = OutputReportBuilder::build_bluetooth_reset_leds(7);
+        assert_eq!(reset_bt[0], 0x31);
+        assert_eq!(reset_bt[1], 0x72);
+        assert_eq!(reset_bt[41], 0x02);
+        assert_eq!(reset_bt[44], 0x02);
+        let mut h2 = Hasher::new();
+        h2.update(&[0xA2]);
+        h2.update(&reset_bt[0..74]);
+        assert_eq!(h2.finalize(), LittleEndian::read_u32(&reset_bt[74..78]));
     }
 
     #[test]

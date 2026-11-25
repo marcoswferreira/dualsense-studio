@@ -678,6 +678,25 @@ impl DualSenseManager {
         self.lighting.read().clone()
     }
 
+    /// Returns the latest mapped physical controller HID input state (sticks, triggers, buttons, IMU, touchpad)
+    pub fn get_input_state(&self) -> DualSenseInputState {
+        self.input_state.read().clone()
+    }
+
+    /// Returns whether the physical controller is currently connected and enabled
+    pub fn is_connected(&self) -> bool {
+        *self.extension_enabled.read() && *self.connected.read()
+    }
+
+    /// Returns the active controller display name
+    pub fn controller_name(&self) -> String {
+        if self.is_connected() {
+            self.controller_name.read().clone()
+        } else {
+            "Disconnected".to_string()
+        }
+    }
+
     pub fn cemuhook_port(&self) -> u16 {
         self.cemuhook_port
     }

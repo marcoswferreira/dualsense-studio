@@ -234,11 +234,14 @@ impl OutputReportBuilder {
     }
 
     /// Builds a 78-byte Bluetooth Output Report (Report ID 0x31) with CRC32
+    /// matching Linux `drivers/hid/hid-playstation.c::dualsense_output_report_bt`.
     pub fn build_bluetooth(&self) -> [u8; BT_OUTPUT_REPORT_SIZE] {
         let mut report = [0u8; BT_OUTPUT_REPORT_SIZE];
         report[0] = 0x31; // Report ID
-                          // Highest 4-bit is rolling sequence number (0..15), lowest 4-bit is 0x02 flag
-        report[1] = ((self.seq_num & 0x0F) << 4) | 0x02;
+                          // Upper nibble = rolling 4-bit sequence (0..15), lower nibble MUST be 0x00 when using DS_OUTPUT_TAG (0x10).
+                          // Setting bit 0x02 here shifts the firmware parser by 1 byte, causing valid_flag0 to be read as valid_flag1
+                          // (turning off all LEDs via RELEASE_LEDS bit 0x08 and disabling triggers/rumble!).
+        report[1] = (self.seq_num & 0x0F) << 4;
         report[2] = 0x10; // DS_OUTPUT_TAG (0x10)
 
         // valid_flag0: When bt_hd_haptics is active, keep legacy rumble flags (0x01|0x02) clear
@@ -311,7 +314,7 @@ impl OutputReportBuilder {
     pub fn build_bluetooth_reset_leds(seq_num: u8) -> [u8; BT_OUTPUT_REPORT_SIZE] {
         let mut report = [0u8; BT_OUTPUT_REPORT_SIZE];
         report[0] = 0x31;
-        report[1] = ((seq_num & 0x0F) << 4) | 0x02;
+        report[1] = (seq_num & 0x0F) << 4;
         report[2] = 0x10;
         report[41] = 0x02; // DS_OUTPUT_VALID_FLAG2_LIGHTBAR_SETUP_CONTROL_ENABLE
         report[44] = 0x02; // DS_OUTPUT_LIGHTBAR_SETUP_LIGHT_OUT
@@ -669,7 +672,7 @@ mod tests {
 
         let bt = builder.build_bluetooth();
         assert_eq!(bt[0], 0x31);
-        assert_eq!(bt[1], 0x32);
+        assert_eq!(bt[1], 0x30);
         assert_eq!(bt[2], 0x10);
         assert_eq!(bt[3], 0x0F);
         assert_eq!(bt[4], 0x15);
@@ -690,7 +693,7 @@ mod tests {
         // One-shot Bluetooth LED reset handshake with valid CRC32
         let reset_bt = OutputReportBuilder::build_bluetooth_reset_leds(7);
         assert_eq!(reset_bt[0], 0x31);
-        assert_eq!(reset_bt[1], 0x72);
+        assert_eq!(reset_bt[1], 0x70);
         assert_eq!(reset_bt[41], 0x02);
         assert_eq!(reset_bt[44], 0x02);
         let mut h2 = Hasher::new();

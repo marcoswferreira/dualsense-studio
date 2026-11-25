@@ -126,7 +126,7 @@ fn regression_bluetooth_sequence_masking_and_crc32_all_values() {
             .build_bluetooth();
 
         assert_eq!(report[0], 0x31);
-        assert_eq!(report[1], ((seq & 0x0F) << 4) | 0x02);
+        assert_eq!(report[1], (seq & 0x0F) << 4);
         assert_eq!(report[2], 0x10);
 
         let embedded_crc = LittleEndian::read_u32(&report[74..78]);

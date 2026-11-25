@@ -226,7 +226,7 @@ async fn e2e_udp_datagram_to_hid_output_report_pipeline() {
     let bt = builder.build_bluetooth();
     assert_eq!(bt.len(), BT_OUTPUT_REPORT_SIZE);
     assert_eq!(bt[0], 0x31);
-    assert_eq!(bt[1], (5 << 4) | 0x02);
+    assert_eq!(bt[1], 5 << 4);
     assert_eq!(bt[4] & 0x08, 0, "RELEASE_LEDS bit must stay clear on BT");
     assert_eq!(bt[5], 95);
     assert_eq!(bt[6], 210);
@@ -607,7 +607,7 @@ async fn e2e_audio_and_microphone_workflow() {
         .with_seq(15);
 
     let bt = custom.build_bluetooth();
-    assert_eq!(bt[1], (15 << 4) | 0x02);
+    assert_eq!(bt[1], 15 << 4);
     assert_eq!(bt[11], MicLed::Pulse.to_byte());
     assert_eq!(bt[46], PlayerLed::All.to_bitmask());
     verify_bt_crc32(&bt);

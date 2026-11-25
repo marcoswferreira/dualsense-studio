@@ -54,8 +54,12 @@ pub struct DualSenseManager {
 
 impl DualSenseManager {
     pub fn new() -> Self {
+        Self::with_udp_port(DEFAULT_DUALSENSEX_UDP_PORT)
+    }
+
+    pub fn with_udp_port(port: u16) -> Self {
         let shared_state = Arc::new(SharedControllerState::default());
-        let udp_server = DualSenseUdpServer::new(DEFAULT_DUALSENSEX_UDP_PORT, shared_state.clone());
+        let udp_server = DualSenseUdpServer::new(port, shared_state.clone());
 
         let initial_input = DualSenseInputState {
             connection: ConnectionType::Usb,

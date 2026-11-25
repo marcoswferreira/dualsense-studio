@@ -45,12 +45,12 @@ impl GyroSettings {
         }
 
         let filter = |val: i16, invert: bool| -> i16 {
-            if val.abs() < self.deadzone {
+            if i32::from(val).abs() < i32::from(self.deadzone) {
                 return 0;
             }
             let adjusted = ((val as f32) * self.sensitivity).clamp(-32768.0, 32767.0) as i16;
             if invert {
-                -adjusted
+                adjusted.saturating_neg()
             } else {
                 adjusted
             }

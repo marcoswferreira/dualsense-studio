@@ -20,12 +20,14 @@ export const App: React.FC = () => {
   return (
     <>
       <DualSenseTab onShowToast={showToast} />
-      {toast && (
-        <div role="status" className="studio-toast">
-          <CheckCircle2 size={16} color="#60a5fa" />
-          <span>{toast}</span>
-        </div>
-      )}
+      <div role="status" aria-live="polite" aria-atomic="true">
+        {toast && (
+          <div className="studio-toast">
+            <CheckCircle2 size={16} color="#60a5fa" aria-hidden="true" />
+            <span>{toast}</span>
+          </div>
+        )}
+      </div>
     </>
   );
 };

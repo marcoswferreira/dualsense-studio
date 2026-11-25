@@ -15,7 +15,7 @@ export const UdpServerStudio: React.FC<Props> = ({ stats, onToggle }) => {
     <>
       <div className="page-header">
         <div>
-          <h2 className="page-title">{t('dualsense_udp_title')}</h2>
+          <h1 className="page-title">{t('dualsense_udp_title')}</h1>
           <p className="page-subtitle">{t('dualsense_udp_subtitle')}</p>
         </div>
         <button className={`btn ${stats.running ? 'danger' : 'primary'}`} onClick={() => onToggle(!stats.running)}>

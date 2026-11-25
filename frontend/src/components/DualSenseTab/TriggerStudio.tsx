@@ -289,7 +289,7 @@ export const TriggerStudio: React.FC<Props> = ({ triggers: initialTriggers, onAp
     <>
       <div className="page-header">
         <div>
-          <h2 className="page-title">{t('dualsense_triggers_title')}</h2>
+          <h1 className="page-title">{t('dualsense_triggers_title')}</h1>
           <p className="page-subtitle">{t('dualsense_triggers_subtitle')}</p>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>

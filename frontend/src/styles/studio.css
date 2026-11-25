@@ -4,12 +4,18 @@
    ========================================================================== */
 
 :root {
+  color-scheme: dark;
+  accent-color: #3b82f6;
+
   --bg-canvas: #070a10;
   --bg-rail: #0c111a;
   --bg-header: rgba(12, 17, 26, 0.86);
   --bg-surface: #111824;
   --bg-surface-hover: #162030;
   --bg-input: #0a0f18;
+
+  --scrollbar-thumb: #64748b;
+  --scrollbar-track: #0c111a;
 
   --border-subtle: rgba(148, 163, 184, 0.12);
   --border-strong: rgba(148, 163, 184, 0.24);
@@ -53,20 +59,54 @@ html, body, #root {
   overflow: hidden;
 }
 
-/* Custom slim scrollbars */
-::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+/* Standard accessible scrollbar theming (>=3:1 thumb contrast, default width) */
+:root, .studio-rail, .studio-viewport {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: auto;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+
+@supports not (scrollbar-color: auto) {
+  .studio-rail, .studio-viewport {
+    scrollbar-width: auto;
+  }
+  .studio-rail::-webkit-scrollbar, .studio-viewport::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .studio-rail::-webkit-scrollbar-track, .studio-viewport::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+  .studio-rail::-webkit-scrollbar-thumb, .studio-viewport::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 99px;
+  }
 }
-::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.2);
-  border-radius: 99px;
+
+::selection {
+  background: rgba(59, 130, 246, 0.35);
+  color: #ffffff;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.35);
+
+/* High-contrast keyboard focus ring across all interactive controls */
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
+}
+
+.btn, .rail-item, .seg-btn {
+  min-block-size: 32px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-content,
+  .studio-toast,
+  .touchpad-shell.anim-breathing,
+  .touchpad-shell.anim-rainbow {
+    animation: none;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ==========================================================================
@@ -521,15 +561,14 @@ html, body, #root {
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 13px;
-  outline: none;
   transition: border-color var(--ease);
 }
 
-.select:focus, .input:focus {
+.select:focus-visible, .input:focus-visible {
   border-color: var(--accent);
 }
 
-/* Custom slim range slider */
+/* Custom slim range slider (Chromium + Firefox) */
 input[type="range"].slider {
   -webkit-appearance: none;
   appearance: none;
@@ -537,8 +576,16 @@ input[type="range"].slider {
   height: 5px;
   border-radius: 99px;
   background: rgba(148, 163, 184, 0.22);
-  outline: none;
   cursor: pointer;
+}
+
+input[type="range"].slider::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  border: 2px solid #fff;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
 }
 
 input[type="range"].slider::-webkit-slider-thumb {

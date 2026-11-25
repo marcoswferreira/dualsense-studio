@@ -240,47 +240,54 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
     {
       id: 'tester',
       label: t('dualsense_subtab_tester'),
-      icon: <Gamepad2 size={16} />,
+      icon: <Gamepad2 size={16} aria-hidden="true" />,
       badge: isHardwareConnected ? 'LIVE' : undefined,
       activeBadge: isHardwareConnected,
     },
-    { id: 'triggers', label: t('dualsense_subtab_triggers'), icon: <Zap size={16} /> },
-    { id: 'lighting', label: t('dualsense_subtab_lighting'), icon: <Sparkles size={16} /> },
+    { id: 'triggers', label: t('dualsense_subtab_triggers'), icon: <Zap size={16} aria-hidden="true" /> },
+    { id: 'lighting', label: t('dualsense_subtab_lighting'), icon: <Sparkles size={16} aria-hidden="true" /> },
     {
       id: 'mapping',
       label: t('dualsense_subtab_mapping'),
-      icon: <SlidersHorizontal size={16} />,
+      icon: <SlidersHorizontal size={16} aria-hidden="true" />,
       badge: currentStatus.cemuhook_stats.running ? 'DSU' : undefined,
       activeBadge: currentStatus.cemuhook_stats.running,
     },
     {
       id: 'emulation',
       label: t('dualsense_subtab_emulation'),
-      icon: <Cpu size={16} />,
+      icon: <Cpu size={16} aria-hidden="true" />,
       badge: currentStatus.emulation.mode !== 'native' ? currentStatus.emulation.mode.toUpperCase().slice(0, 4) : undefined,
       activeBadge: currentStatus.emulation.mode !== 'native',
     },
     {
       id: 'haptics',
       label: t('dualsense_subtab_haptics'),
-      icon: <Waves size={16} />,
+      icon: <Waves size={16} aria-hidden="true" />,
       badge: currentStatus.haptics_metrics.active ? '0x32' : undefined,
       activeBadge: currentStatus.haptics_metrics.active,
     },
     {
       id: 'udp',
       label: t('dualsense_subtab_udp'),
-      icon: <Radio size={16} />,
+      icon: <Radio size={16} aria-hidden="true" />,
       badge: currentStatus.udp_stats.running ? 'ON' : undefined,
       activeBadge: currentStatus.udp_stats.running,
     },
     {
       id: 'profiles',
       label: t('dualsense_subtab_profiles'),
-      icon: <FolderKanban size={16} />,
+      icon: <FolderKanban size={16} aria-hidden="true" />,
       badge: String(currentStatus.profiles.length || 4),
     },
   ];
+
+  const activeNavLabel = navItems.find((n) => n.id === activeSubTab)?.label;
+  useEffect(() => {
+    if (activeNavLabel) {
+      document.title = `${activeNavLabel} | DualSense Studio`;
+    }
+  }, [activeNavLabel]);
 
   return (
     <div className="studio-shell">
@@ -299,10 +306,11 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
         <nav className="rail-nav" aria-label="Primary">
           {navItems.map((item) => (
             <button
+              type="button"
               key={item.id}
+              aria-current={activeSubTab === item.id ? 'page' : undefined}
               className={`rail-item ${activeSubTab === item.id ? 'active' : ''}`}
               onClick={() => setActiveSubTab(item.id)}
-              title={item.label}
             >
               <span className="rail-item-left">
                 {item.icon}
@@ -391,22 +399,27 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
           <div className="topbar-actions">
             {WebHidDualSenseController.isSupported() && (
               <button
+                type="button"
+                aria-pressed={isWebHidConnected}
                 className={`btn sm ${isWebHidConnected ? 'primary' : ''}`}
                 onClick={isWebHidConnected ? handleDisconnectWebHid : handleConnectWebHid}
               >
-                <Zap size={13} />
+                <Zap size={13} aria-hidden="true" />
                 {isWebHidConnected ? 'WebHID ON' : 'WebHID'}
               </button>
             )}
             <button
+              type="button"
+              aria-pressed={currentStatus.mic_muted}
               className={`btn sm ${currentStatus.mic_muted ? 'warn' : ''}`}
               onClick={handleToggleMic}
-              title={t('btn_toggle_mic')}
             >
-              {currentStatus.mic_muted ? <MicOff size={13} /> : <Mic size={13} />}
+              {currentStatus.mic_muted ? <MicOff size={13} aria-hidden="true" /> : <Mic size={13} aria-hidden="true" />}
               {currentStatus.mic_muted ? 'MIC MUTED' : 'MIC'}
             </button>
             <button
+              type="button"
+              aria-pressed={currentStatus.udp_stats.running}
               className={`btn sm ${currentStatus.udp_stats.running ? 'primary' : ''}`}
               onClick={() =>
                 void postJson(
@@ -418,7 +431,7 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
                 )
               }
             >
-              <Radio size={13} />
+              <Radio size={13} aria-hidden="true" />
               UDP :{currentStatus.udp_stats.port}
             </button>
           </div>

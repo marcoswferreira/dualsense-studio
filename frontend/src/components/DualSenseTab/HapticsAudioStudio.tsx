@@ -44,7 +44,7 @@ export const HapticsAudioStudio: React.FC<Props> = ({
     <>
       <div className="page-header">
         <div>
-          <h2 className="page-title">{t('dualsense_haptics_title')}</h2>
+          <h1 className="page-title">{t('dualsense_haptics_title')}</h1>
           <p className="page-subtitle">{t('dualsense_haptics_subtitle')}</p>
         </div>
         <span className={`chip ${metrics.active ? 'success' : ''}`}>

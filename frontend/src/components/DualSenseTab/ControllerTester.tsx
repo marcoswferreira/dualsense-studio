@@ -30,7 +30,7 @@ const StickReticle: React.FC<{ label: string; x: number; y: number; clicked: boo
       <span className="field-label" style={{ gap: '6px' }}>
         {label} {clicked && <span className="chip accent">CLICK</span>}
       </span>
-      <svg width="112" height="112" viewBox="0 0 112 112" aria-label={label}>
+      <svg role="img" width="112" height="112" viewBox="0 0 112 112" aria-label={label}>
         <circle
           cx="56"
           cy="56"
@@ -110,7 +110,7 @@ export const ControllerTester: React.FC<Props> = ({
     <>
       <div className="page-header">
         <div>
-          <h2 className="page-title">{t('dualsense_tester_title')}</h2>
+          <h1 className="page-title">{t('dualsense_tester_title')}</h1>
           <p className="page-subtitle">{t('dualsense_tester_subtitle')}</p>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>

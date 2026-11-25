@@ -57,7 +57,7 @@ export const EmulationStudio: React.FC<Props> = ({
     <>
       <div className="page-header">
         <div>
-          <h2 className="page-title">{t('dualsense_emulation_title')}</h2>
+          <h1 className="page-title">{t('dualsense_emulation_title')}</h1>
           <p className="page-subtitle">{t('dualsense_emulation_subtitle')}</p>
         </div>
       </div>
@@ -79,26 +79,36 @@ export const EmulationStudio: React.FC<Props> = ({
         <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{virtualDriver.detail}</span>
       </div>
 
-      {/* 4 Balanced Mode Cards */}
+      {/* 4 Balanced Mode Cards (native buttons for full keyboard & AT semantics) */}
       <div className="grid-4">
         {modes.map((m) => {
           const selected = emulation.mode === m.id;
           return (
-            <div
+            <button
+              type="button"
               key={m.id}
+              aria-pressed={selected}
               className={`card card-interactive ${selected ? 'selected' : ''}`}
               onClick={() => commit({ ...emulation, mode: m.id })}
-              style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '12px' }}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: '12px',
+                textAlign: 'left',
+                font: 'inherit',
+                color: 'inherit',
+              }}
             >
               <div>
-                <div style={{ marginBottom: '10px' }}>{m.icon}</div>
+                <div style={{ marginBottom: '10px' }} aria-hidden="true">{m.icon}</div>
                 <div style={{ fontSize: '14px', fontWeight: 600, color: '#fff', marginBottom: '6px' }}>{m.title}</div>
                 <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{m.desc}</p>
               </div>
               <span className={`chip ${selected ? 'accent' : ''}`} style={{ alignSelf: 'flex-start' }}>
                 {selected ? 'ACTIVE' : 'SELECT'}
               </span>
-            </div>
+            </button>
           );
         })}
       </div>

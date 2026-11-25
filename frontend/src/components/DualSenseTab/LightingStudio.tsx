@@ -75,7 +75,7 @@ export const LightingStudio: React.FC<Props> = ({ lighting: initialLighting, onA
     <>
       <div className="page-header">
         <div>
-          <h2 className="page-title">{t('dualsense_lighting_title')}</h2>
+          <h1 className="page-title">{t('dualsense_lighting_title')}</h1>
           <p className="page-subtitle">{t('dualsense_lighting_subtitle')}</p>
         </div>
         <span className="chip accent">40 Hz HARDWARE SYNC</span>

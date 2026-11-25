@@ -45,7 +45,7 @@ const DeadzoneRing: React.FC<{ stick: StickTuning }> = ({ stick }) => {
   const antiR = Math.min(outerR, (stick.inner_deadzone + stick.anti_deadzone) * maxR);
 
   return (
-    <svg width="92" height="92" viewBox="0 0 92 92" style={{ flexShrink: 0 }} aria-label="Deadzone Preview">
+    <svg role="img" width="92" height="92" viewBox="0 0 92 92" style={{ flexShrink: 0 }} aria-label="Deadzone Preview">
       <circle cx="46" cy="46" r={maxR} fill="#0a0f18" stroke="rgba(148,163,184,0.22)" strokeWidth="1.2" />
       <circle cx="46" cy="46" r={outerR} fill="rgba(59,130,246,0.1)" stroke="#3b82f6" strokeWidth="1.4" strokeDasharray="3 2" />
       {stick.anti_deadzone > 0 && (
@@ -172,7 +172,7 @@ export const MappingStudio: React.FC<Props> = ({
     <>
       <div className="page-header">
         <div>
-          <h2 className="page-title">{t('dualsense_mapping_title')}</h2>
+          <h1 className="page-title">{t('dualsense_mapping_title')}</h1>
           <p className="page-subtitle">{t('dualsense_mapping_subtitle')}</p>
         </div>
       </div>

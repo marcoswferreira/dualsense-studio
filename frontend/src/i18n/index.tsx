@@ -22,6 +22,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     return saved === 'pt' ? 'pt' : 'en';
   });
 
+  useEffect(() => {
+    document.documentElement.lang = lang === 'pt' ? 'pt-BR' : 'en';
+  }, [lang]);
+
   const setLang = (newLang: Language) => {
     setLangState(newLang);
     localStorage.setItem('dualsense_studio_lang', newLang);

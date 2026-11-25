@@ -68,7 +68,7 @@ export const GameProfilesStudio: React.FC<Props> = ({
     <>
       <div className="page-header">
         <div>
-          <h2 className="page-title">{t('dualsense_profiles_title')}</h2>
+          <h1 className="page-title">{t('dualsense_profiles_title')}</h1>
           <p className="page-subtitle">{t('dualsense_profiles_subtitle')}</p>
         </div>
       </div>

@@ -24,12 +24,6 @@ use dualsense_core::triggers::{DualTriggerConfig, TriggerEffect};
 use dualsense_core::vigem::{map_input_to_ds4, map_input_to_xusb};
 use tokio::net::UdpSocket;
 
-fn allocate_free_udp_port() -> u16 {
-    let socket =
-        std::net::UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).expect("bind ephemeral UDP");
-    socket.local_addr().expect("read local addr").port()
-}
-
 async fn wait_for_condition<F, Fut>(timeout: Duration, mut check: F) -> bool
 where
     F: FnMut() -> Fut,
@@ -141,8 +135,7 @@ fn build_bt_extended_input_report(
 /// E2E: Real loopback UDP datagrams -> DualSenseUdpServer -> DualSenseManager -> USB & BT HID output reports
 #[tokio::test]
 async fn e2e_udp_datagram_to_hid_output_report_pipeline() {
-    let port = allocate_free_udp_port();
-    let manager = DualSenseManager::with_udp_port(port);
+    let manager = DualSenseManager::with_ports(0, 0);
     manager.set_extension_enabled(true);
     manager.set_connected(true, "Sony DualSense Wireless Controller");
 
@@ -153,7 +146,8 @@ async fn e2e_udp_datagram_to_hid_output_report_pipeline() {
 
     let status_started = manager.get_status().await;
     assert!(status_started.udp_stats.running);
-    assert_eq!(status_started.udp_stats.port, port);
+    let port = status_started.udp_stats.port;
+    assert_ne!(port, 0);
     assert_eq!(status_started.udp_stats.packets_received, 0);
 
     let client = UdpSocket::bind("127.0.0.1:0")
@@ -301,7 +295,7 @@ async fn e2e_raw_hid_input_to_manager_emulation_and_output_pipeline() {
     let initial_transport = detect_connection_type(r"\\?\hid#vid_054c&pid_0ce6&mi_03#7", 3);
     assert_eq!(initial_transport, ConnectionType::Usb);
 
-    let manager = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    let manager = DualSenseManager::with_ports(0, 0);
     manager.set_extension_enabled(true);
     manager.set_connected(true, name);
 
@@ -476,7 +470,7 @@ async fn e2e_raw_hid_input_to_manager_emulation_and_output_pipeline() {
 /// E2E: Applying every built-in profile updates status, JSON API contract, and HID output reports
 #[tokio::test]
 async fn e2e_profile_switching_and_status_serialization_contract() {
-    let manager = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    let manager = DualSenseManager::with_ports(0, 0);
     manager.set_extension_enabled(true);
     manager.set_connected(true, "Sony DualSense Edge Wireless Controller");
 
@@ -536,7 +530,7 @@ async fn e2e_profile_switching_and_status_serialization_contract() {
 /// E2E: Audio & microphone controls, speaker volume clamping, and platform command construction
 #[tokio::test]
 async fn e2e_audio_and_microphone_workflow() {
-    let manager = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    let manager = DualSenseManager::with_ports(0, 0);
     manager.set_extension_enabled(true);
     manager.set_connected(true, "Sony DualSense Wireless Controller");
 
@@ -622,7 +616,7 @@ async fn e2e_virtual_dualsense_bidirectional_bridge_with_mapping() {
         decode_dualsense_usb_output_report, MockVirtualDualSenseBackend,
     };
 
-    let manager = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    let manager = DualSenseManager::with_ports(0, 0);
     manager.set_extension_enabled(true);
     manager.set_connected(true, "Sony DualSense Edge Wireless Controller");
     manager.set_rumble_gain(1.5);
@@ -705,7 +699,7 @@ async fn e2e_bluetooth_hd_haptics_0x32_and_audio_dsp_pipeline() {
     use dualsense_core::haptics_audio::{AudioToHapticsDsp, HapticsConfig, HapticsMode};
     use dualsense_core::protocol::{build_bluetooth_haptics_0x32, BT_HAPTICS_REPORT_SIZE};
 
-    let manager = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    let manager = DualSenseManager::with_ports(0, 0);
     let haptics_cfg = HapticsConfig {
         mode: HapticsMode::AudioToHaptics,
         enabled: true,
@@ -769,9 +763,7 @@ async fn e2e_bluetooth_hd_haptics_0x32_and_audio_dsp_pipeline() {
 async fn e2e_cemuhook_motion_udp_live_streaming() {
     use dualsense_core::cemuhook::{DSU_PROTOCOL_VERSION, MSG_TYPE_DATA, MSG_TYPE_PORTS};
 
-    let udp_port = allocate_free_udp_port();
-    let cemu_port = allocate_free_udp_port();
-    let manager = DualSenseManager::with_ports(udp_port, cemu_port);
+    let manager = DualSenseManager::with_ports(0, 0);
     manager.set_extension_enabled(true);
     manager.set_connected(true, "Sony DualSense Wireless Controller");
 
@@ -785,6 +777,8 @@ async fn e2e_cemuhook_motion_udp_live_streaming() {
         .start_cemuhook()
         .await
         .expect("start cemuhook server");
+    let cemu_port = manager.get_status().await.cemuhook_stats.port;
+    assert_ne!(cemu_port, 0);
 
     let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let target = SocketAddr::from(([127, 0, 0, 1], cemu_port));
@@ -848,7 +842,7 @@ async fn e2e_standalone_config_persistence_and_restore() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let cfg_path = tmp.path().join("config.json");
 
-    let mgr_a = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    let mgr_a = DualSenseManager::with_ports(0, 0);
     mgr_a.set_extension_enabled(true);
     mgr_a.set_rumble_gain(1.35);
     mgr_a.add_custom_profile(TriggerProfile {
@@ -880,7 +874,7 @@ async fn e2e_standalone_config_persistence_and_restore() {
     exported.save_to_path(&cfg_path).expect("save config.json");
 
     let loaded = AppConfig::load_from_path(&cfg_path);
-    let mgr_b = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    let mgr_b = DualSenseManager::with_ports(0, 0);
     mgr_b.apply_config(&loaded);
 
     assert!((mgr_b.get_rumble_gain() - 1.35).abs() < 1e-5);

@@ -1,5 +1,4 @@
 use std::mem::size_of;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use byteorder::{ByteOrder, LittleEndian};
@@ -22,12 +21,6 @@ use dualsense_core::vigem::{
     ViGEmUnplugTarget, XusbReport, XusbSubmitReport, IOCTL_DS4_SUBMIT_REPORT,
     IOCTL_VIGEM_PLUGIN_TARGET, IOCTL_VIGEM_UNPLUG_TARGET, IOCTL_XUSB_SUBMIT_REPORT,
 };
-
-fn allocate_free_udp_port() -> u16 {
-    let socket =
-        std::net::UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).expect("bind ephemeral UDP");
-    socket.local_addr().expect("read local addr").port()
-}
 
 /// REG-01 & REG-02: Firmware LED lock-out guard (`RELEASE_LEDS` 0x08 must never be set),
 /// continuous `LIGHT_OUT` bug guard (`valid_flag2` and `lightbar_setup` must be 0x00 on normal
@@ -802,8 +795,7 @@ fn regression_lightbar_color_math_and_hex_parsing() {
 /// REG-10: Manager state gating, disconnect telemetry cleanup, and UDP start/stop idempotency.
 #[tokio::test]
 async fn regression_manager_state_isolation_and_udp_idempotency() {
-    let port = allocate_free_udp_port();
-    let manager = DualSenseManager::with_udp_port(port);
+    let manager = DualSenseManager::with_ports(0, 0);
 
     // Even if connected flag is set, disabled extension must mask connection & audio detection
     manager.set_connected(true, "Sony DualSense Wireless Controller");
@@ -997,7 +989,7 @@ fn regression_animated_lightbar_40hz_and_virtual_dualsense_reverse_decoder() {
         decode_dualsense_usb_output_report, decode_trigger_payload,
     };
 
-    let manager = DualSenseManager::with_udp_port(allocate_free_udp_port());
+    let manager = DualSenseManager::with_ports(0, 0);
     manager.set_lighting(LightingConfig {
         lightbar: LightbarMode::Rainbow { speed: 1.0 },
         player_led: PlayerLed::Player1,

@@ -255,6 +255,7 @@ pub fn build_pad_data_response(
 /// Live Cemuhook / DSU Motion UDP Server
 pub struct CemuhookUdpServer {
     port: u16,
+    bound_port: Option<u16>,
     server_id: u32,
     running: Arc<AtomicBool>,
     packets_sent: Arc<AtomicU64>,
@@ -269,6 +270,7 @@ impl CemuhookUdpServer {
     pub fn new(port: u16) -> Self {
         Self {
             port,
+            bound_port: None,
             server_id: 0x4453_5354, // "DSST"
             running: Arc::new(AtomicBool::new(false)),
             packets_sent: Arc::new(AtomicU64::new(0)),
@@ -294,7 +296,7 @@ impl CemuhookUdpServer {
             .count();
         CemuhookStats {
             running: self.running.load(Ordering::SeqCst),
-            port: self.port,
+            port: self.bound_port.unwrap_or(self.port),
             active_clients,
             packets_sent: self.packets_sent.load(Ordering::SeqCst),
             packets_received: self.packets_received.load(Ordering::SeqCst),
@@ -307,6 +309,8 @@ impl CemuhookUdpServer {
         }
 
         let socket = Arc::new(UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], self.port))).await?);
+        let actual_port = socket.local_addr()?.port();
+        self.bound_port = Some(actual_port);
         self.running.store(true, Ordering::SeqCst);
 
         let running = self.running.clone();
@@ -390,7 +394,7 @@ impl CemuhookUdpServer {
         });
 
         self.worker_handle = Some(handle);
-        tracing::info!("Cemuhook Motion UDP server started on port {}", self.port);
+        tracing::info!("Cemuhook Motion UDP server started on port {}", actual_port);
         Ok(())
     }
 
@@ -399,6 +403,7 @@ impl CemuhookUdpServer {
             if let Some(handle) = self.worker_handle.take() {
                 handle.abort();
             }
+            self.bound_port = None;
             self.subscribers.write().clear();
             tracing::info!("Cemuhook Motion UDP server stopped");
         }
@@ -452,16 +457,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_cemuhook_udp_server_roundtrip() {
-        let probe = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-        let port = probe.local_addr().unwrap().port();
-        drop(probe);
-
-        let mut server = CemuhookUdpServer::new(port);
+        let mut server = CemuhookUdpServer::new(0);
         let mut state = DualSenseInputState::default();
         state.battery.percentage = 85;
         state.motion.gyro_y = 3276;
         server.update_state(true, state);
         server.start().await.expect("start cemuhook server");
+        let port = server.stats().port;
+        assert_ne!(port, 0);
 
         let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let target = SocketAddr::from(([127, 0, 0, 1], port));

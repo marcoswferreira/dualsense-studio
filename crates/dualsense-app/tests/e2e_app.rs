@@ -14,12 +14,6 @@ use dualsense_core::{DualSenseManager, DualSenseStatus};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
 
-fn allocate_free_udp_port() -> u16 {
-    let socket =
-        std::net::UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).expect("bind ephemeral UDP");
-    socket.local_addr().expect("read local addr").port()
-}
-
 async fn send_http_request(
     addr: SocketAddr,
     method: &str,
@@ -143,9 +137,7 @@ fn e2e_application_binary_starts_and_runs_cleanly() {
 /// including mapping, BT HD haptics, rumble gain, Cemuhook UDP, custom profiles, and disk persistence.
 #[tokio::test]
 async fn e2e_http_api_full_lifecycle() {
-    let udp_port = allocate_free_udp_port();
-    let cemu_port = allocate_free_udp_port();
-    let manager = Arc::new(DualSenseManager::with_ports(udp_port, cemu_port));
+    let manager = Arc::new(DualSenseManager::with_ports(0, 0));
     manager.set_extension_enabled(true);
     manager.set_connected(true, "Sony DualSense Wireless Controller");
 
@@ -389,11 +381,12 @@ async fn e2e_http_api_full_lifecycle() {
 /// E2E: Verifies full app-level runtime integration with DualSenseManager and live UDP link
 #[tokio::test]
 async fn e2e_app_runtime_manager_and_udp_integration() {
-    let port = allocate_free_udp_port();
-    let manager = DualSenseManager::with_udp_port(port);
+    let manager = DualSenseManager::with_ports(0, 0);
     manager.set_extension_enabled(true);
     manager.set_connected(true, "Sony DualSense Wireless Controller");
     manager.start_udp().await.expect("start app UDP server");
+    let port = manager.get_status().await.udp_stats.port;
+    assert_ne!(port, 0);
 
     let client = UdpSocket::bind("127.0.0.1:0")
         .await

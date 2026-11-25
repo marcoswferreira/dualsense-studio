@@ -64,6 +64,7 @@ pub struct SharedControllerState {
 
 pub struct DualSenseUdpServer {
     port: u16,
+    bound_port: Option<u16>,
     is_running: Arc<AtomicBool>,
     packets_received: Arc<AtomicU64>,
     last_packet_time: Arc<RwLock<Option<i64>>>,
@@ -76,6 +77,7 @@ impl DualSenseUdpServer {
     pub fn new(port: u16, shared_state: Arc<SharedControllerState>) -> Self {
         Self {
             port,
+            bound_port: None,
             is_running: Arc::new(AtomicBool::new(false)),
             packets_received: Arc::new(AtomicU64::new(0)),
             last_packet_time: Arc::new(RwLock::new(None)),
@@ -88,7 +90,7 @@ impl DualSenseUdpServer {
     pub fn stats(&self) -> UdpServerStats {
         UdpServerStats {
             running: self.is_running.load(Ordering::SeqCst),
-            port: self.port,
+            port: self.bound_port.unwrap_or(self.port),
             packets_received: self.packets_received.load(Ordering::SeqCst),
             last_packet_time: *self.last_packet_time.read(),
             last_sender: self.last_sender.read().clone(),
@@ -102,21 +104,26 @@ impl DualSenseUdpServer {
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
         let socket = UdpSocket::bind(addr).await?;
+        let actual_port = socket.local_addr()?.port();
+        self.bound_port = Some(actual_port);
         self.is_running.store(true, Ordering::SeqCst);
 
         // Write %TEMP%\DualSenseX\DualSenseX_PortNumber.txt for Paliverse/DualSenseX mod discovery
-        let temp_dsx_dir = std::env::temp_dir().join("DualSenseX");
-        if let Err(e) = std::fs::create_dir_all(&temp_dsx_dir) {
-            tracing::debug!("Could not create temp DualSenseX dir: {}", e);
-        } else {
-            let port_file = temp_dsx_dir.join("DualSenseX_PortNumber.txt");
-            if let Err(e) = std::fs::write(&port_file, self.port.to_string()) {
-                tracing::debug!("Could not write DualSenseX_PortNumber.txt: {}", e);
+        // Skip global temp file overwrite when bound to ephemeral port 0 in isolated tests
+        if self.port != 0 {
+            let temp_dsx_dir = std::env::temp_dir().join("DualSenseX");
+            if let Err(e) = std::fs::create_dir_all(&temp_dsx_dir) {
+                tracing::debug!("Could not create temp DualSenseX dir: {}", e);
             } else {
-                tracing::info!(
-                    "Published DualSenseX port discovery file at {}",
-                    port_file.display()
-                );
+                let port_file = temp_dsx_dir.join("DualSenseX_PortNumber.txt");
+                if let Err(e) = std::fs::write(&port_file, actual_port.to_string()) {
+                    tracing::debug!("Could not write DualSenseX_PortNumber.txt: {}", e);
+                } else {
+                    tracing::info!(
+                        "Published DualSenseX port discovery file at {}",
+                        port_file.display()
+                    );
+                }
             }
         }
 
@@ -155,7 +162,7 @@ impl DualSenseUdpServer {
         });
 
         self.worker_handle = Some(handle);
-        tracing::info!("DualSenseX Link UDP server started on port {}", self.port);
+        tracing::info!("DualSenseX Link UDP server started on port {}", actual_port);
         Ok(())
     }
 
@@ -164,6 +171,7 @@ impl DualSenseUdpServer {
             if let Some(handle) = self.worker_handle.take() {
                 handle.abort();
             }
+            self.bound_port = None;
             tracing::info!("DualSenseX Link UDP server stopped");
         }
     }
@@ -320,11 +328,12 @@ mod tests {
     #[tokio::test]
     async fn test_udp_server_lifecycle_and_packet_processing() {
         let shared = Arc::new(SharedControllerState::default());
-        let mut server = DualSenseUdpServer::new(16969, shared.clone());
+        let mut server = DualSenseUdpServer::new(0, shared.clone());
 
         assert!(!server.stats().running);
         server.start().await.expect("Failed to bind UDP port");
         assert!(server.stats().running);
+        assert_ne!(server.stats().port, 0);
 
         // Process a DualSenseX JSON packet directly
         let payload = r#"{

@@ -650,6 +650,12 @@ fn serve_static_asset(path: &str) -> (u16, &'static str, &'static str, Vec<u8>) 
                 "text/css; charset=utf-8"
             } else if rel.ends_with(".svg") {
                 "image/svg+xml"
+            } else if rel.ends_with(".ico") {
+                "image/x-icon"
+            } else if rel.ends_with(".png") {
+                "image/png"
+            } else if rel.ends_with(".webmanifest") {
+                "application/manifest+json; charset=utf-8"
             } else {
                 "application/octet-stream"
             };

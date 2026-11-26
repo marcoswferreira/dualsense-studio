@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use dualsense_app::process_watcher::ProcessProfileWatcher;
-use dualsense_app::server::{start_http_server_with_config, DEFAULT_API_ADDR};
+use dualsense_app::server::{
+    is_existing_dualsense_server, start_http_server_with_fallback, DEFAULT_API_ADDR,
+};
 use dualsense_app::tray::{hide_console_window_if_windows, open_browser, TrayHandle};
 use dualsense_core::{default_config_path, AppConfig, DualSenseManager, HidDeviceWorker};
 use tracing::{info, warn};
@@ -46,8 +48,18 @@ async fn main() -> Result<()> {
 
     let api_addr =
         std::env::var("DUALSENSE_API_ADDR").unwrap_or_else(|_| DEFAULT_API_ADDR.to_string());
+    if is_existing_dualsense_server(&api_addr).await {
+        info!("DualSense Studio is already running at http://{}", api_addr);
+        if args.iter().any(|a| a == "--open-ui") {
+            open_browser(&format!("http://{}", api_addr));
+        }
+        hid_worker.stop();
+        process_watcher.stop();
+        return Ok(());
+    }
+
     let (bound_addr, http_handle) =
-        start_http_server_with_config(&api_addr, manager.clone(), Some(config_path.clone()))
+        start_http_server_with_fallback(&api_addr, manager.clone(), Some(config_path.clone()))
             .await?;
 
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);

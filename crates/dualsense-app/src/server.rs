@@ -96,6 +96,73 @@ pub async fn start_http_server_with_config(
     Ok((local_addr, handle))
 }
 
+/// Checks if an existing DualSense Studio HTTP server is already responding on `addr`.
+pub async fn is_existing_dualsense_server(addr: &str) -> bool {
+    let Ok(mut stream) = tokio::time::timeout(
+        std::time::Duration::from_millis(350),
+        TcpStream::connect(addr),
+    )
+    .await
+    .unwrap_or_else(|_| Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout"))) else {
+        return false;
+    };
+
+    let req =
+        format!("GET /api/dualsense/status HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(req.as_bytes()).await.is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 512];
+    let n = tokio::time::timeout(std::time::Duration::from_millis(350), stream.read(&mut buf))
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .unwrap_or(0);
+    let resp = String::from_utf8_lossy(&buf[..n]);
+    resp.contains("extension_enabled") && resp.contains("udp_stats")
+}
+
+/// Starts the HTTP API server on `preferred_addr`, falling back to `48081..=48099` and `127.0.0.1:0`
+/// if `preferred_addr` is already in use or reserved by the OS.
+pub async fn start_http_server_with_fallback(
+    preferred_addr: &str,
+    manager: Arc<DualSenseManager>,
+    config_path: Option<PathBuf>,
+) -> Result<(SocketAddr, tokio::task::JoinHandle<()>)> {
+    match start_http_server_with_config(preferred_addr, manager.clone(), config_path.clone()).await
+    {
+        Ok(res) => Ok(res),
+        Err(first_err) => {
+            let is_addr_in_use = first_err.downcast_ref::<std::io::Error>().is_some_and(|e| {
+                matches!(
+                    e.kind(),
+                    std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied
+                )
+            });
+            if !is_addr_in_use {
+                return Err(first_err);
+            }
+
+            warn!(
+                "Preferred HTTP API address {} is unavailable ({}); trying fallback ports...",
+                preferred_addr, first_err
+            );
+
+            for port in 48081u16..=48099u16 {
+                let candidate = format!("127.0.0.1:{port}");
+                if let Ok(res) =
+                    start_http_server_with_config(&candidate, manager.clone(), config_path.clone())
+                        .await
+                {
+                    return Ok(res);
+                }
+            }
+
+            start_http_server_with_config("127.0.0.1:0", manager, config_path).await
+        }
+    }
+}
+
 async fn persist_if_configured(manager: &Arc<DualSenseManager>, config_path: &Option<PathBuf>) {
     if let Some(path) = config_path.as_ref() {
         let cfg = manager.export_config().await;

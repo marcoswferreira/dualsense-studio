@@ -129,11 +129,12 @@ jobs:
           tar -C release -czf "release/${ARCHIVE}" "dualsense-studio-${TAG}-${{ matrix.platform }}"
           (cd release && sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256")
 
-      - name: Package Windows Release Zip
+      - name: Package Windows Release Zip & Setup Installer
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $tag = "${{ steps.meta.outputs.tag }}"
+          $version = $tag.TrimStart('v')
           $archive = "dualsense-studio-$tag-${{ matrix.platform }}.zip"
           $stage = "release\dualsense-studio-$tag-${{ matrix.platform }}"
           New-Item -ItemType Directory -Force -Path "$stage\ui" | Out-Null
@@ -144,6 +145,18 @@ jobs:
           $hash = (Get-FileHash -Algorithm SHA256 "release\$archive").Hash.ToLower()
           "$hash  $archive" | Out-File -Encoding ascii "release\$archive.sha256"
 
+          $iscc = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+          if (-not $iscc -and (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          if ($iscc) {
+            $setupBase = "dualsense-studio-$tag-${{ matrix.platform }}-setup"
+            & $iscc "/DAppVersion=$version" "/DSourceDir=..\..\$stage" "/DOutputDir=..\..\release" "/DOutputBaseFilename=$setupBase" "packaging\windows\dualsense-studio.iss"
+            $setupExe = "$setupBase.exe"
+            $setupHash = (Get-FileHash -Algorithm SHA256 "release\$setupExe").Hash.ToLower()
+            "$setupHash  $setupExe" | Out-File -Encoding ascii "release\$setupExe.sha256"
+          }
+
       - name: Upload Release Platform Bundle
         uses: actions/upload-artifact@v7
         with:
@@ -151,6 +164,7 @@ jobs:
           path: |
             release/*.tar.gz
             release/*.zip
+            release/*-setup.exe
             release/*.sha256
           retention-days: 7
 

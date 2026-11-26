@@ -4,23 +4,18 @@ use std::sync::Arc;
 use anyhow::Result;
 use dualsense_app::process_watcher::ProcessProfileWatcher;
 use dualsense_app::server::{start_http_server_with_config, DEFAULT_API_ADDR};
+use dualsense_app::tray::{hide_console_window_if_windows, open_browser, TrayHandle};
 use dualsense_core::{default_config_path, AppConfig, DualSenseManager, HidDeviceWorker};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-fn open_browser(url: &str) {
-    #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd")
-        .args(["/C", "start", "", url])
-        .spawn();
-    #[cfg(target_os = "linux")]
-    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-    #[cfg(target_os = "macos")]
-    let _ = std::process::Command::new("open").arg(url).spawn();
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--tray" || a == "--minimized") {
+        hide_console_window_if_windows();
+    }
+
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
@@ -52,16 +47,42 @@ async fn main() -> Result<()> {
     let api_addr =
         std::env::var("DUALSENSE_API_ADDR").unwrap_or_else(|_| DEFAULT_API_ADDR.to_string());
     let (bound_addr, http_handle) =
-        start_http_server_with_config(&api_addr, manager.clone(), Some(config_path)).await?;
+        start_http_server_with_config(&api_addr, manager.clone(), Some(config_path.clone()))
+            .await?;
 
-    if std::env::args().any(|a| a == "--open-ui") {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+    let no_tray = args.iter().any(|a| a == "--no-tray");
+    let mut tray_handle = if no_tray {
+        None
+    } else {
+        Some(TrayHandle::start(
+            manager.clone(),
+            bound_addr,
+            config_path,
+            shutdown_tx,
+        ))
+    };
+
+    if args.iter().any(|a| a == "--open-ui") {
         open_browser(&format!("http://{}", bound_addr));
     }
 
-    info!("DualSense Studio is running. Press Ctrl+C to terminate.");
-    tokio::signal::ctrl_c().await?;
+    info!("DualSense Studio is running. Press Ctrl+C or use the system tray to exit.");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = async {
+            while !*shutdown_rx.borrow() {
+                if shutdown_rx.changed().await.is_err() {
+                    std::future::pending::<()>().await;
+                }
+            }
+        } => {}
+    }
 
     info!("Shutting down DualSense Studio.");
+    if let Some(mut tray) = tray_handle.take() {
+        tray.stop();
+    }
     http_handle.abort();
     process_watcher.stop();
     manager.stop_udp().await;

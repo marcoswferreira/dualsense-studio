@@ -228,6 +228,7 @@ mod windows_tray {
     const ID_TOGGLE_UDP: usize = 1021;
     const ID_TOGGLE_CEMUHOOK: usize = 1022;
     const ID_TOGGLE_AUTOSTART: usize = 1023;
+    const ID_CHECK_UPDATES: usize = 1030;
     const ID_QUIT: usize = 1099;
 
     const TIMER_REFRESH_ID: usize = 1;
@@ -344,7 +345,19 @@ mod windows_tray {
         fn KillTimer(hwnd: HWND, u_id_event: usize) -> BOOL;
         fn SetWindowLongPtrW(hwnd: HWND, n_index: i32, dw_new_long: isize) -> isize;
         fn GetWindowLongPtrW(hwnd: HWND, n_index: i32) -> isize;
+        fn MessageBoxW(
+            hwnd: HWND,
+            lp_text: *const u16,
+            lp_caption: *const u16,
+            u_type: UINT,
+        ) -> i32;
     }
+
+    const MB_OK: UINT = 0x0000_0000;
+    const MB_YESNO: UINT = 0x0000_0004;
+    const MB_ICONINFORMATION: UINT = 0x0000_0040;
+    const MB_ICONWARNING: UINT = 0x0000_0030;
+    const IDYES: i32 = 6;
 
     #[link(name = "gdi32")]
     extern "system" {
@@ -483,6 +496,7 @@ mod windows_tray {
             let udp_txt = to_wide("DualSenseX UDP Link Server");
             let cemu_txt = to_wide("Cemuhook Motion Server (DSU)");
             let auto_txt = to_wide("Start with Windows (Tray)");
+            let update_txt = to_wide("Check for Updates...");
             let quit_txt = to_wide("Quit DualSense Studio");
 
             AppendMenuW(menu, MF_STRING, ID_OPEN_UI, open_txt.as_ptr());
@@ -521,6 +535,7 @@ mod windows_tray {
             AppendMenuW(menu, cemu_flags, ID_TOGGLE_CEMUHOOK, cemu_txt.as_ptr());
             AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
             AppendMenuW(menu, auto_flags, ID_TOGGLE_AUTOSTART, auto_txt.as_ptr());
+            AppendMenuW(menu, MF_STRING, ID_CHECK_UPDATES, update_txt.as_ptr());
             AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
             AppendMenuW(menu, MF_STRING, ID_QUIT, quit_txt.as_ptr());
 
@@ -593,6 +608,62 @@ mod windows_tray {
                 ctx.manager.set_autostart_enabled(next);
                 set_windows_autostart(next);
                 persist_config(ctx);
+            }
+            ID_CHECK_UPDATES => {
+                let title = to_wide("DualSense Studio - Updates");
+                match ctx.runtime.block_on(crate::updater::check_for_updates()) {
+                    Ok(info) => {
+                        if info.update_available {
+                            let msg = to_wide(&format!(
+                                "New version {} is available (current: {}).\n\nDownload and install automatically now?",
+                                info.latest_version, info.current_version
+                            ));
+                            let choice = unsafe {
+                                MessageBoxW(
+                                    hwnd,
+                                    msg.as_ptr(),
+                                    title.as_ptr(),
+                                    MB_YESNO | MB_ICONINFORMATION,
+                                )
+                            };
+                            if choice == IDYES {
+                                if let Err(e) = ctx.runtime.block_on(crate::updater::apply_update(
+                                    &info,
+                                    Some(&ctx.shutdown_tx),
+                                )) {
+                                    let err_msg = to_wide(&format!("Update failed: {e}"));
+                                    unsafe {
+                                        MessageBoxW(
+                                            hwnd,
+                                            err_msg.as_ptr(),
+                                            title.as_ptr(),
+                                            MB_OK | MB_ICONWARNING,
+                                        );
+                                    }
+                                }
+                            }
+                        } else {
+                            let msg = to_wide(&format!(
+                                "DualSense Studio (v{}) is up to date.",
+                                info.current_version
+                            ));
+                            unsafe {
+                                MessageBoxW(
+                                    hwnd,
+                                    msg.as_ptr(),
+                                    title.as_ptr(),
+                                    MB_OK | MB_ICONINFORMATION,
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let msg = to_wide(&format!("Could not check for updates: {e}"));
+                        unsafe {
+                            MessageBoxW(hwnd, msg.as_ptr(), title.as_ptr(), MB_OK | MB_ICONWARNING);
+                        }
+                    }
+                }
             }
             ID_QUIT => {
                 let _ = ctx.shutdown_tx.send(true);

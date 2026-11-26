@@ -11,7 +11,10 @@ use serde::Deserialize;
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::watch;
 use tracing::{debug, info, warn};
+
+use crate::updater::{apply_update, check_for_updates};
 
 pub const DEFAULT_API_ADDR: &str = "127.0.0.1:48080";
 
@@ -65,6 +68,16 @@ pub async fn start_http_server_with_config(
     manager: Arc<DualSenseManager>,
     config_path: Option<PathBuf>,
 ) -> Result<(SocketAddr, tokio::task::JoinHandle<()>)> {
+    start_http_server_with_config_and_shutdown(bind_addr, manager, config_path, None).await
+}
+
+/// Starts the HTTP API server on `bind_addr` with optional config persistence and shutdown trigger
+pub async fn start_http_server_with_config_and_shutdown(
+    bind_addr: &str,
+    manager: Arc<DualSenseManager>,
+    config_path: Option<PathBuf>,
+    shutdown_tx: Option<watch::Sender<bool>>,
+) -> Result<(SocketAddr, tokio::task::JoinHandle<()>)> {
     let listener = TcpListener::bind(bind_addr).await?;
     let local_addr = listener.local_addr()?;
     info!(
@@ -73,6 +86,7 @@ pub async fn start_http_server_with_config(
     );
 
     let cfg_path = Arc::new(config_path);
+    let shutdown_arc = Arc::new(shutdown_tx);
 
     let handle = tokio::spawn(async move {
         loop {
@@ -80,8 +94,9 @@ pub async fn start_http_server_with_config(
                 Ok((stream, _peer)) => {
                     let mgr = manager.clone();
                     let path = cfg_path.clone();
+                    let sd = shutdown_arc.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_connection(stream, mgr, path).await {
+                        if let Err(e) = handle_connection(stream, mgr, path, sd).await {
                             debug!("HTTP connection error: {}", e);
                         }
                     });
@@ -129,7 +144,23 @@ pub async fn start_http_server_with_fallback(
     manager: Arc<DualSenseManager>,
     config_path: Option<PathBuf>,
 ) -> Result<(SocketAddr, tokio::task::JoinHandle<()>)> {
-    match start_http_server_with_config(preferred_addr, manager.clone(), config_path.clone()).await
+    start_http_server_with_fallback_and_shutdown(preferred_addr, manager, config_path, None).await
+}
+
+/// Starts the HTTP API server on `preferred_addr` with port fallback and optional shutdown sender.
+pub async fn start_http_server_with_fallback_and_shutdown(
+    preferred_addr: &str,
+    manager: Arc<DualSenseManager>,
+    config_path: Option<PathBuf>,
+    shutdown_tx: Option<watch::Sender<bool>>,
+) -> Result<(SocketAddr, tokio::task::JoinHandle<()>)> {
+    match start_http_server_with_config_and_shutdown(
+        preferred_addr,
+        manager.clone(),
+        config_path.clone(),
+        shutdown_tx.clone(),
+    )
+    .await
     {
         Ok(res) => Ok(res),
         Err(first_err) => {
@@ -150,15 +181,25 @@ pub async fn start_http_server_with_fallback(
 
             for port in 48081u16..=48099u16 {
                 let candidate = format!("127.0.0.1:{port}");
-                if let Ok(res) =
-                    start_http_server_with_config(&candidate, manager.clone(), config_path.clone())
-                        .await
+                if let Ok(res) = start_http_server_with_config_and_shutdown(
+                    &candidate,
+                    manager.clone(),
+                    config_path.clone(),
+                    shutdown_tx.clone(),
+                )
+                .await
                 {
                     return Ok(res);
                 }
             }
 
-            start_http_server_with_config("127.0.0.1:0", manager, config_path).await
+            start_http_server_with_config_and_shutdown(
+                "127.0.0.1:0",
+                manager,
+                config_path,
+                shutdown_tx,
+            )
+            .await
         }
     }
 }
@@ -176,6 +217,7 @@ async fn handle_connection(
     mut stream: TcpStream,
     manager: Arc<DualSenseManager>,
     config_path: Arc<Option<PathBuf>>,
+    shutdown_tx: Arc<Option<watch::Sender<bool>>>,
 ) -> Result<()> {
     let mut buf = Vec::with_capacity(4096);
     let mut chunk = [0u8; 2048];
@@ -252,7 +294,7 @@ async fn handle_connection(
     let body = &buf[body_start..body_end];
 
     let (status, reason, content_type, resp_body) =
-        route_request(&method, &path, body, &manager, &config_path).await;
+        route_request(&method, &path, body, &manager, &config_path, &shutdown_tx).await;
     write_response(&mut stream, status, reason, content_type, &resp_body).await?;
     Ok(())
 }
@@ -267,6 +309,7 @@ async fn route_request(
     body: &[u8],
     manager: &Arc<DualSenseManager>,
     config_path: &Option<PathBuf>,
+    shutdown_tx: &Option<watch::Sender<bool>>,
 ) -> (u16, &'static str, &'static str, Vec<u8>) {
     if method == "OPTIONS" {
         return (204, "No Content", "text/plain", Vec::new());
@@ -512,6 +555,52 @@ async fn route_request(
             }
         }
         ("POST", "/api/settings") => json_response(200, "OK", &json!({ "ok": true })),
+        ("GET", "/api/app/update/check") => match check_for_updates().await {
+            Ok(info) => json_response(200, "OK", &info),
+            Err(e) => json_response(
+                502,
+                "Bad Gateway",
+                &json!({ "ok": false, "error": e.to_string() }),
+            ),
+        },
+        ("POST", "/api/app/update/apply") => match check_for_updates().await {
+            Ok(info) => {
+                if !info.update_available {
+                    return json_response(
+                        200,
+                        "OK",
+                        &json!({
+                            "ok": true,
+                            "updated": false,
+                            "message": "Already on the latest version",
+                            "current_version": info.current_version
+                        }),
+                    );
+                }
+                match apply_update(&info, shutdown_tx.as_ref()).await {
+                    Ok(msg) => json_response(
+                        200,
+                        "OK",
+                        &json!({
+                            "ok": true,
+                            "updated": true,
+                            "updating_to": info.latest_version,
+                            "message": msg
+                        }),
+                    ),
+                    Err(e) => json_response(
+                        500,
+                        "Internal Server Error",
+                        &json!({ "ok": false, "error": e.to_string() }),
+                    ),
+                }
+            }
+            Err(e) => json_response(
+                502,
+                "Bad Gateway",
+                &json!({ "ok": false, "error": e.to_string() }),
+            ),
+        },
         ("GET", _) => serve_static_asset(path),
         _ => json_response(404, "Not Found", &json!({ "error": "not found" })),
     }

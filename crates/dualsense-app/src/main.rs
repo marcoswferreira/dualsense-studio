@@ -4,9 +4,10 @@ use std::sync::Arc;
 use anyhow::Result;
 use dualsense_app::process_watcher::ProcessProfileWatcher;
 use dualsense_app::server::{
-    is_existing_dualsense_server, start_http_server_with_fallback, DEFAULT_API_ADDR,
+    is_existing_dualsense_server, start_http_server_with_fallback_and_shutdown, DEFAULT_API_ADDR,
 };
 use dualsense_app::tray::{hide_console_window_if_windows, open_browser, TrayHandle};
+use dualsense_app::updater::check_for_updates;
 use dualsense_core::{default_config_path, AppConfig, DualSenseManager, HidDeviceWorker};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -58,11 +59,27 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let (bound_addr, http_handle) =
-        start_http_server_with_fallback(&api_addr, manager.clone(), Some(config_path.clone()))
-            .await?;
-
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let (bound_addr, http_handle) = start_http_server_with_fallback_and_shutdown(
+        &api_addr,
+        manager.clone(),
+        Some(config_path.clone()),
+        Some(shutdown_tx.clone()),
+    )
+    .await?;
+
+    tokio::spawn(async {
+        if let Ok(info) = check_for_updates().await {
+            if info.update_available {
+                info!(
+                    "Update available: {} (current: {}). Download at {}",
+                    info.latest_version, info.current_version, info.release_url
+                );
+            }
+        }
+    });
+
     let no_tray = args.iter().any(|a| a == "--no-tray");
     let mut tray_handle = if no_tray {
         None

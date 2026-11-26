@@ -4,6 +4,7 @@ import {
   BatteryFull,
   Bluetooth,
   Cpu,
+  Download,
   FolderKanban,
   Gamepad2,
   Globe,
@@ -131,6 +132,12 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('tester');
   const [status, setStatus] = useState<DualSenseStatus | null>(null);
   const [isWebHidConnected, setIsWebHidConnected] = useState(webHidController.isConnected());
+  const [updateInfo, setUpdateInfo] = useState<{
+    update_available: boolean;
+    latest_version: string;
+    current_version: string;
+  } | null>(null);
+  const [updatingApp, setUpdatingApp] = useState(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -156,6 +163,56 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
     const interval = window.setInterval(() => void fetchStatus(), 2500);
     return () => window.clearInterval(interval);
   }, [fetchStatus]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/app/update/check');
+        if (res.ok) {
+          const data = await res.json();
+          setUpdateInfo(data);
+        }
+      } catch {
+        // Ignore offline update check failures
+      }
+    })();
+  }, []);
+
+  const handleCheckOrApplyUpdate = async () => {
+    if (updatingApp) return;
+    setUpdatingApp(true);
+    try {
+      if (updateInfo?.update_available) {
+        const res = await fetch('/api/app/update/apply', { method: 'POST' });
+        const data = await res.json();
+        onShowToast?.(
+          data.message ||
+            (lang === 'pt'
+              ? `Atualizando para ${updateInfo.latest_version}...`
+              : `Updating to ${updateInfo.latest_version}...`),
+        );
+      } else {
+        const res = await fetch('/api/app/update/check');
+        if (res.ok) {
+          const data = await res.json();
+          setUpdateInfo(data);
+          onShowToast?.(
+            data.update_available
+              ? lang === 'pt'
+                ? `Nova versão ${data.latest_version} disponível!`
+                : `New version ${data.latest_version} available!`
+              : lang === 'pt'
+                ? `Você já está na versão mais recente (v${data.current_version}).`
+                : `Already up to date (v${data.current_version}).`,
+          );
+        }
+      }
+    } catch {
+      onShowToast?.(lang === 'pt' ? 'Erro ao verificar atualizações.' : 'Failed to check for updates.');
+    } finally {
+      setUpdatingApp(false);
+    }
+  };
 
   const postJson = useCallback(
     async (url: string, body?: unknown, successToast?: string, method: 'POST' | 'DELETE' = 'POST') => {
@@ -356,6 +413,29 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
               <span className="rail-label">{lang.toUpperCase()}</span>
             </button>
           </div>
+
+          <button
+            type="button"
+            className={`btn sm ${updateInfo?.update_available ? 'primary' : ''}`}
+            style={{ width: '100%', marginTop: 6 }}
+            disabled={updatingApp}
+            onClick={() => void handleCheckOrApplyUpdate()}
+          >
+            <Download size={13} />
+            <span className="rail-label">
+              {updatingApp
+                ? lang === 'pt'
+                  ? 'Atualizando...'
+                  : 'Updating...'
+                : updateInfo?.update_available
+                  ? lang === 'pt'
+                    ? `Atualizar ${updateInfo.latest_version}`
+                    : `Update ${updateInfo.latest_version}`
+                  : lang === 'pt'
+                    ? 'Verificar atualizações'
+                    : 'Check for updates'}
+            </span>
+          </button>
         </div>
       </aside>
 

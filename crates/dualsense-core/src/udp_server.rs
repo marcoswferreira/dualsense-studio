@@ -139,7 +139,11 @@ impl DualSenseUdpServer {
                 match socket.recv_from(&mut buf).await {
                     Ok((len, peer)) => {
                         counter.fetch_add(1, Ordering::SeqCst);
-                        *last_time.write() = Some(chrono::Utc::now().timestamp_millis());
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as i64;
+                        *last_time.write() = Some(now_ms);
                         *last_sender.write() = Some(peer.to_string());
 
                         if let Ok(text) = std::str::from_utf8(&buf[..len]) {

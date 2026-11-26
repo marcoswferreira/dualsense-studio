@@ -31,6 +31,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 CloseApplications=yes
 RestartApplications=no
+SetupIconFile=dualsense-studio.ico
 UninstallDisplayIcon={app}\dualsense-studio.exe
 
 [Languages]
@@ -62,11 +63,10 @@ Source: "{#SourceDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion; Componen
 Source: "install-deps.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion; Components: core
 
 [Icons]
-Name: "{group}\DualSense Studio"; Filename: "{app}\dualsense-studio.exe"; Parameters: "--tray --open-ui"; WorkingDir: "{app}"
-Name: "{group}\DualSense Studio (System Tray)"; Filename: "{app}\dualsense-studio.exe"; Parameters: "--tray"; WorkingDir: "{app}"
-Name: "{group}\DualSense Studio (Console)"; Filename: "{app}\dualsense-studio.exe"; WorkingDir: "{app}"
+Name: "{group}\DualSense Studio"; Filename: "{app}\dualsense-studio.exe"; Parameters: "--tray --open-ui"; WorkingDir: "{app}"; IconFilename: "{app}\dualsense-studio.exe"
+Name: "{group}\DualSense Studio (System Tray)"; Filename: "{app}\dualsense-studio.exe"; Parameters: "--tray"; WorkingDir: "{app}"; IconFilename: "{app}\dualsense-studio.exe"
 Name: "{group}\{cm:UninstallProgram,DualSense Studio}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\DualSense Studio"; Filename: "{app}\dualsense-studio.exe"; Parameters: "--tray --open-ui"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\DualSense Studio"; Filename: "{app}\dualsense-studio.exe"; Parameters: "--tray --open-ui"; WorkingDir: "{app}"; IconFilename: "{app}\dualsense-studio.exe"; Tasks: desktopicon
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "DualSenseStudio"; ValueData: """{app}\dualsense-studio.exe"" --tray"; Flags: uninsdeletevalue; Tasks: autostart

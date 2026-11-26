@@ -6,14 +6,54 @@ use std::thread::JoinHandle;
 use dualsense_core::DualSenseManager;
 use tokio::sync::watch;
 
-/// Opens the DualSense Studio web UI URL in the user's default browser.
+/// Opens the DualSense Studio UI as a standalone Desktop App window (Edge/Chrome `--app` mode),
+/// falling back to the default system browser if no Chromium runtime is found.
 pub fn open_browser(url: &str) {
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd")
-        .args(["/C", "start", "", url])
-        .spawn();
+    {
+        let app_arg = format!("--app={url}");
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        for env_key in ["ProgramFiles(x86)", "ProgramFiles", "LocalAppData"] {
+            if let Ok(base) = std::env::var(env_key) {
+                let p = PathBuf::from(&base);
+                candidates.push(p.join(r"Microsoft\Edge\Application\msedge.exe"));
+                candidates.push(p.join(r"Google\Chrome\Application\chrome.exe"));
+                candidates.push(p.join(r"BraveSoftware\Brave-Browser\Application\brave.exe"));
+            }
+        }
+        for bin in candidates {
+            if bin.is_file()
+                && std::process::Command::new(&bin)
+                    .args([&app_arg, "--window-size=1280,840"])
+                    .spawn()
+                    .is_ok()
+            {
+                return;
+            }
+        }
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn();
+    }
     #[cfg(target_os = "linux")]
-    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    {
+        let app_arg = format!("--app={url}");
+        for bin in [
+            "google-chrome",
+            "chromium",
+            "chromium-browser",
+            "microsoft-edge",
+        ] {
+            if std::process::Command::new(bin)
+                .args([&app_arg, "--window-size=1280,840"])
+                .spawn()
+                .is_ok()
+            {
+                return;
+            }
+        }
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").arg(url).spawn();
 }

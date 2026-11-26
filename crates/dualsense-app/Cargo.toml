@@ -25,3 +25,6 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"

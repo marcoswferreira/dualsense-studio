@@ -62,6 +62,26 @@ pub fn detect_connection_from_input_report(slice: &[u8]) -> Option<ConnectionTyp
     }
 }
 
+/// Determines whether an active HID session should be considered disconnected based on
+/// consecutive write errors paired with input silence, or a failed liveness probe.
+pub fn should_disconnect_on_error(
+    is_currently_connected: bool,
+    write_error_count: u32,
+    since_last_input: Duration,
+    probe_ok: Option<bool>,
+) -> bool {
+    if !is_currently_connected {
+        return since_last_input > Duration::from_millis(1200);
+    }
+    if probe_ok == Some(false) {
+        return true;
+    }
+    if write_error_count >= 2 && since_last_input > Duration::from_millis(250) {
+        return true;
+    }
+    since_last_input > Duration::from_millis(2000)
+}
+
 pub struct HidDeviceWorker {
     running: Arc<AtomicBool>,
 }
@@ -101,7 +121,7 @@ impl HidDeviceWorker {
                     if candidates.is_empty() {
                         manager.set_connected(false, "Disconnected");
                         // No physical device visible directly in this OS environment
-                        thread::sleep(Duration::from_secs(2));
+                        thread::sleep(Duration::from_millis(700));
                         continue;
                     }
 
@@ -139,8 +159,8 @@ impl HidDeviceWorker {
                     }
 
                     let Some((dev_info, device)) = opened else {
-                        warn!("Could not open any Sony HID interface. Retrying in 2s...");
-                        thread::sleep(Duration::from_secs(2));
+                        warn!("Could not open any Sony HID interface. Retrying in 1s...");
+                        thread::sleep(Duration::from_secs(1));
                         continue;
                     };
 
@@ -189,6 +209,7 @@ impl HidDeviceWorker {
                     let mut last_send = std::time::Instant::now();
                     let mut last_haptic_send = std::time::Instant::now();
                     let mut last_input_time = std::time::Instant::now();
+                    let mut last_probe_time = std::time::Instant::now();
                     let mut is_currently_connected = false;
                     let mut bt_seq: u8 = 0;
                     let mut haptic_pkt_counter: u8 = 0;
@@ -252,13 +273,37 @@ impl HidDeviceWorker {
                             }
                             Ok(_) => {
                                 // Timeout expired with no report read
-                                if is_currently_connected && last_input_time.elapsed() > Duration::from_millis(3000) {
-                                    warn!("DualSense input report timeout (>3s). Controller disconnected or turned off.");
-                                    is_currently_connected = false;
-                                    manager.set_connected(false, "Disconnected");
-                                    break;
-                                } else if !is_currently_connected && last_input_time.elapsed() > Duration::from_millis(3000) {
-                                    debug!("Device opened but did not produce any input reports in 3s. Closing device.");
+                                let silence = last_input_time.elapsed();
+                                let probe_ok = if is_currently_connected
+                                    && silence > Duration::from_millis(600)
+                                    && last_probe_time.elapsed() >= Duration::from_millis(300)
+                                {
+                                    last_probe_time = std::time::Instant::now();
+                                    let mut probe_buf = [0u8; 41];
+                                    probe_buf[0] = if is_ds { 0x05 } else { 0x02 };
+                                    Some(device.get_feature_report(&mut probe_buf).is_ok())
+                                } else {
+                                    None
+                                };
+
+                                if should_disconnect_on_error(
+                                    is_currently_connected,
+                                    write_error_count,
+                                    silence,
+                                    probe_ok,
+                                ) {
+                                    if is_currently_connected {
+                                        warn!(
+                                            "DualSense disconnected or powered off (silence={}ms, write_errors={}, probe={:?}).",
+                                            silence.as_millis(),
+                                            write_error_count,
+                                            probe_ok
+                                        );
+                                        is_currently_connected = false;
+                                        manager.set_connected(false, "Disconnected");
+                                    } else {
+                                        debug!("Device opened but produced no input reports in 1.2s. Closing device.");
+                                    }
                                     break;
                                 }
                             }
@@ -410,7 +455,7 @@ impl HidDeviceWorker {
                                     write_error_count += 1;
                                     if write_error_count <= 5 || write_error_count.is_multiple_of(100) {
                                         warn!(
-                                            "Failed to write {:?} output report (id=0x{:02x}, len={}B) to DualSense: {} (consecutive_errors={}). Pausing output writes briefly.",
+                                            "Failed to write {:?} output report (id=0x{:02x}, len={}B) to DualSense: {} (consecutive_errors={}).",
                                             connection,
                                             report[0],
                                             report.len(),
@@ -418,8 +463,18 @@ impl HidDeviceWorker {
                                             write_error_count
                                         );
                                     }
-                                    // Never disconnect the controller on write error! Input polling and gamepad emulation continue running.
-                                    last_send = std::time::Instant::now() + Duration::from_millis(500);
+                                    if should_disconnect_on_error(
+                                        is_currently_connected,
+                                        write_error_count,
+                                        last_input_time.elapsed(),
+                                        None,
+                                    ) {
+                                        warn!("DualSense output write failed after disconnect; closing HID session.");
+                                        is_currently_connected = false;
+                                        manager.set_connected(false, "Disconnected");
+                                        break;
+                                    }
+                                    last_send = std::time::Instant::now() + Duration::from_millis(250);
                                 }
                             }
                         }
@@ -429,7 +484,7 @@ impl HidDeviceWorker {
                         manager.set_connected(false, "Disconnected");
                     }
                     info!("Controller disconnected or worker resetting.");
-                    thread::sleep(Duration::from_secs(1));
+                    thread::sleep(Duration::from_millis(350));
                 }
             })
             .expect("Failed to spawn dualsense-hid-worker");
@@ -519,5 +574,44 @@ mod tests {
             detect_connection_from_input_report(&usb_rep),
             Some(ConnectionType::Usb)
         );
+    }
+
+    #[test]
+    fn test_should_disconnect_on_error_and_liveness_probe() {
+        // Active controller with recent input stays connected even on transient write error
+        assert!(!should_disconnect_on_error(
+            true,
+            1,
+            Duration::from_millis(50),
+            None
+        ));
+        // Failed liveness probe disconnects immediately
+        assert!(should_disconnect_on_error(
+            true,
+            0,
+            Duration::from_millis(700),
+            Some(false)
+        ));
+        // Passing liveness probe keeps idle controller connected (<2s)
+        assert!(!should_disconnect_on_error(
+            true,
+            0,
+            Duration::from_millis(700),
+            Some(true)
+        ));
+        // Consecutive write errors + input silence triggers fast disconnect
+        assert!(should_disconnect_on_error(
+            true,
+            2,
+            Duration::from_millis(300),
+            None
+        ));
+        // Unopened device times out after 1.2s
+        assert!(should_disconnect_on_error(
+            false,
+            0,
+            Duration::from_millis(1300),
+            None
+        ));
     }
 }

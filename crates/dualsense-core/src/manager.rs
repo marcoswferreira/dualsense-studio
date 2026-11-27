@@ -740,7 +740,7 @@ impl DualSenseManager {
         *self.controller_name.write() = name.to_string();
         *self.audio_device_detected.write() = connected;
         if !connected {
-            self.input_state.write().battery = BatteryState::default();
+            *self.input_state.write() = DualSenseInputState::default();
             *self.shared_state.heavy_rumble.write() = 0;
             *self.shared_state.light_rumble.write() = 0;
         }

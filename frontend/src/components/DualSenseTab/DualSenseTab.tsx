@@ -140,11 +140,18 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
   const [updatingApp, setUpdatingApp] = useState(false);
 
   useEffect(() => {
+    webHidController.onDisconnect(() => {
+      setIsWebHidConnected(false);
+      onShowToast?.(t('toast_webhid_disconnected'));
+    });
     const timer = window.setInterval(() => {
       setIsWebHidConnected(webHidController.isConnected());
     }, 900);
-    return () => window.clearInterval(timer);
-  }, []);
+    return () => {
+      webHidController.onDisconnect(null);
+      window.clearInterval(timer);
+    };
+  }, [onShowToast, t]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -160,7 +167,7 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
 
   useEffect(() => {
     void fetchStatus();
-    const interval = window.setInterval(() => void fetchStatus(), 2500);
+    const interval = window.setInterval(() => void fetchStatus(), 1000);
     return () => window.clearInterval(interval);
   }, [fetchStatus]);
 

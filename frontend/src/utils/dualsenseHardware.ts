@@ -40,6 +40,7 @@ interface NavigatorWithHid extends Navigator {
     requestDevice(options: {
       filters: Array<{ vendorId: number; productId?: number }>;
     }): Promise<HidDeviceLike[]>;
+    addEventListener?: (type: 'disconnect', listener: (ev: { device?: HidDeviceLike }) => void) => void;
   };
 }
 
@@ -349,9 +350,29 @@ function micLedByte(led: LightingConfig['mic_led']): number {
 
 export class WebHidDualSenseController {
   private device: HidDeviceLike | null = null;
+  private disconnectListenerBound = false;
+  private onDisconnectCallback: (() => void) | null = null;
 
   static isSupported(): boolean {
     return typeof navigator !== 'undefined' && 'hid' in navigator;
+  }
+
+  onDisconnect(cb: (() => void) | null): void {
+    this.onDisconnectCallback = cb;
+  }
+
+  private ensureDisconnectListener(): void {
+    if (this.disconnectListenerBound || typeof navigator === 'undefined') return;
+    const nav = navigator as NavigatorWithHid;
+    if (nav.hid?.addEventListener) {
+      this.disconnectListenerBound = true;
+      nav.hid.addEventListener('disconnect', (ev) => {
+        if (this.device && (!ev.device || ev.device === this.device)) {
+          this.device = null;
+          this.onDisconnectCallback?.();
+        }
+      });
+    }
   }
 
   isConnected(): boolean {
@@ -378,6 +399,7 @@ export class WebHidDualSenseController {
         await dev.open();
       }
       this.device = dev;
+      this.ensureDisconnectListener();
       // One-shot LIGHT_OUT reset handshake so host RGB takes over cleanly
       try {
         const init = new Uint8Array(47);

@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DualSense Studio · Adaptive Triggers, HD Haptics &amp; Controller Emulation in Rust</title>
+  <meta name="description" content="Open-source PlayStation 5 DualSense &amp; DualSense Edge suite written in Rust: USB &amp; Bluetooth HID, Adaptive Triggers, Audio-to-Haptics (0x32), ViGEmBus + HidHide auto-cloaking, Virtual DualSense, and Cemuhook/DualSenseX UDP.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b101b">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#">
+        <span class="mark" aria-hidden="true"><img src="favicon.svg" alt=""></span>
+        <span>DualSense Studio</span>
+      </a>
+      <nav class="topnav" aria-label="Primary">
+        <a href="#features">Features</a>
+        <a href="#architecture">Pipeline</a>
+        <a href="#install">Install</a>
+        <a href="#docs">Docs</a>
+        <a href="https://github.com/marcoswferreira/dualsense-studio">GitHub</a>
+      </nav>
+      <a class="button small" href="https://github.com/marcoswferreira/dualsense-studio/releases/tag/v0.2.0">Download v0.2.0</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap">
+        <p class="eyebrow">DualSense Studio v0.2.0 · Windows &amp; Linux Controller Suite · Built in Rust</p>
+        <h1>Precision DualSense.<br><span class="accent">Built in Rust.</span><br>Triggers, Haptics &amp; Emulation.</h1>
+        <p class="lede">
+          Take full command of your PlayStation 5 DualSense &amp; DualSense Edge over USB and Bluetooth.
+          Tune adaptive triggers in real time, convert system audio into 3 kHz Bluetooth HD haptics (<code>0x32</code>),
+          emulate Xbox 360 / DualShock 4 with automatic HidHide cloaking, or expose a bidirectional Virtual DualSense.
+        </p>
+
+        <div class="actions">
+          <a class="button" href="https://github.com/marcoswferreira/dualsense-studio/releases/tag/v0.2.0">Download v0.2.0</a>
+          <a class="button ghost" href="#install">Quick install</a>
+          <a class="button ghost" href="https://github.com/marcoswferreira/dualsense-studio">View source</a>
+        </div>
+        <p class="fine">
+          Windows 10/11 x64 &amp; Linux · Single-instance Windows System Tray · Free and open source (GPL-3.0) ·
+          <a href="https://github.com/marcoswferreira/dualsense-studio/releases">All releases</a>
+        </p>
+
+        <div class="lightbar-stage" id="lightbar-stage" style="--lb-color: #3b82f6;">
+          <div class="lightbar-beam" aria-hidden="true"></div>
+          <div class="lightbar-meta">
+            <span class="lightbar-dot" aria-hidden="true"></span>
+            <span id="lightbar-label">LIGHTBAR 40 HZ // COBALT PULSE (#3B82F6)</span>
+          </div>
+          <div class="lightbar-swatches" role="group" aria-label="Preview lightbar preset">
+            <button type="button" class="swatch" aria-pressed="true" data-color="#3b82f6" data-label="LIGHTBAR 40 HZ // COBALT PULSE (#3B82F6)">Cobalt</button>
+            <button type="button" class="swatch" aria-pressed="false" data-color="#22d3ee" data-label="LIGHTBAR 40 HZ // CYAN TELEMETRY (#22D3EE)">Cyan</button>
+            <button type="button" class="swatch" aria-pressed="false" data-color="#22c55e" data-label="LIGHTBAR 40 HZ // BATTERY FULL (#22C55E)">Battery</button>
+            <button type="button" class="swatch" aria-pressed="false" data-color="#f59e0b" data-label="LIGHTBAR 40 HZ // TACTICAL AMBER (#F59E0B)">Amber</button>
+          </div>
+        </div>
+
+        <div class="pillars">
+          <article class="pillar">
+            <p class="pillar-tag">01 // Zero-Overhead HID</p>
+            <h3>USB &amp; Bluetooth CRC32</h3>
+            <p>Decodes compact <code>0x01</code> and extended <code>0x31</code> reports with hardware CRC32 verification, DualSense Edge paddles, and live SSE UI telemetry.</p>
+          </article>
+          <article class="pillar">
+            <p class="pillar-tag">02 // Adaptive Triggers</p>
+            <h3>Real-Time Force Curves</h3>
+            <p>Instant presets (<code>Feedback</code>, <code>Weapon</code>, <code>Bow</code>, <code>Machine</code>, <code>GameCube</code>, DualSenseX) plus custom zone tuning.</p>
+          </article>
+          <article class="pillar">
+            <p class="pillar-tag">03 // HD Haptics 0x32</p>
+            <h3>WASAPI Audio-to-Haptics</h3>
+            <p>Captures OS loopback audio and runs a 48 kHz to 3 kHz low-pass/envelope DSP pipeline straight into Bluetooth Report <code>0x32</code>.</p>
+          </article>
+          <article class="pillar">
+            <p class="pillar-tag">04 // Emulation &amp; Cloak</p>
+            <h3>ViGEmBus + Auto HidHide</h3>
+            <p>Emulates Xbox 360, DualShock 4, or Virtual DualSense (<code>uhid</code> / <code>usbip-win2</code>) with automatic HidHide cloaking and game-exit restore.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section">
+      <div class="wrap">
+        <p class="eyebrow">Capabilities</p>
+        <h2>Every DualSense subsystem, unified</h2>
+        <p class="section-lead">
+          Engineered as a standalone single-instance Rust daemon with an embedded React studio, native Windows System Tray, and automatic GitHub release updates.
+        </p>
+
+        <div class="feature-grid">
+          <article class="feature-card">
+            <span class="feature-index">01 / MAPPING</span>
+            <h3>Curves, Touchpad Mouse &amp; Gyro</h3>
+            <p>Per-stick inner/outer/anti-deadzones, hair-trigger thresholds, paddle &amp; <code>NextProfile</code> remaps, EMA gyro smoothing, toggle activation, and OS mouse/scroll control.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">02 / AUDIO DSP</span>
+            <h3>Live OS Loopback Capture</h3>
+            <p>Windows WASAPI COM loopback and Linux <code>parec</code> capture feed the real-time 3 kHz haptic synthesizer with adjustable gain, cutoff, and L/R balance.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">03 / CLOAKING</span>
+            <h3>Automatic HidHide Sync</h3>
+            <p>Detects <code>HidHideCLI.exe</code>, allowlists DualSense Studio, and automatically hides the physical controller in Xbox 360 / DS4 mode to eliminate double-input.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">04 / AUTOMATION</span>
+            <h3>Per-Game Profiles &amp; Restore</h3>
+            <p><code>ProcessProfileWatcher</code> switches triggers and RGB when a matching game launches, snapshots your previous setup, and restores it cleanly when the game exits.</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">05 / PROTOCOLS</span>
+            <h3>Cemuhook DSU &amp; DualSenseX</h3>
+            <p>Built-in 100 Hz Cemuhook motion server (<code>:26760</code>) for Cemu/Dolphin/Ryujinx plus DualSenseX JSON UDP listener (<code>:6969</code>).</p>
+          </article>
+          <article class="feature-card">
+            <span class="feature-index">06 / DIAGNOSTICS</span>
+            <h3>SSE Stream &amp; Log Bundle</h3>
+            <p>Low-jitter Server-Sent Events (<code>/api/dualsense/events</code>) with polling fallback, rotating <code>dualsense-studio.log</code>, and one-click Copy Diagnostics.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture" class="section">
+      <div class="wrap">
+        <p class="eyebrow">Architecture &amp; Telemetry</p>
+        <h2>Predictable data path from HID to game</h2>
+        <p class="section-lead">
+          Shared lock-free/RwLock state coordinates HID input decoding, 40 Hz lightbar animations, virtual device output, and browser/app telemetry without blocking the 1000 Hz input loop.
+        </p>
+
+        <div class="split-grid">
+          <div class="panel">
+            <h3>Signal &amp; Feedback Pipeline</h3>
+            <div class="pipeline-steps">
+              <div class="pipe-step">
+                <code>HID IN</code>
+                <span><strong>USB 0x01 / BT 0x31</strong> decoded with transport detection, battery state, and CRC32 check.</span>
+              </div>
+              <div class="pipe-step">
+                <code>MAPPER</code>
+                <span>Applies <strong>deadzones, response curves, EMA gyro, Toggle</strong>, and <strong>Touchpad Mouse</strong>.</span>
+              </div>
+              <div class="pipe-step">
+                <code>EMULATE</code>
+                <span>Routes to <strong>ViGEmBus (X360/DS4)</strong> with HidHide cloak or <strong>Virtual DualSense</strong>.</span>
+              </div>
+              <div class="pipe-step">
+                <code>HID OUT</code>
+                <span>Merges <strong>40 Hz Lightbar</strong>, <strong>Adaptive Triggers</strong>, and <strong>0x32 Audio Haptics</strong>.</span>
+              </div>
+              <div class="pipe-step">
+                <code>SSE UI</code>
+                <span>Streams live <strong>input &amp; status</strong> frames to the React Studio on <code>:48080</code>.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Platform &amp; Endpoint Spec</h3>
+            <div class="spec-list">
+              <div class="spec-row">
+                <span>Web UI &amp; HTTP API</span>
+                <code>127.0.0.1:48080</code>
+              </div>
+              <div class="spec-row">
+                <span>SSE Telemetry Stream</span>
+                <code>GET /api/dualsense/events</code>
+              </div>
+              <div class="spec-row">
+                <span>Diagnostics Logs</span>
+                <code>GET /api/app/logs</code>
+              </div>
+              <div class="spec-row">
+                <span>Cemuhook Motion UDP</span>
+                <code>UDP :26760 (100 Hz)</code>
+              </div>
+              <div class="spec-row">
+                <span>DualSenseX UDP Link</span>
+                <code>UDP :6969</code>
+              </div>
+              <div class="spec-row">
+                <span>Virtual Drivers (Win)</span>
+                <code>ViGEmBus · HidHide · usbip-win2</code>
+              </div>
+              <div class="spec-row">
+                <span>Virtual Drivers (Linux)</span>
+                <code>/dev/uhid · 70-dualsense.rules</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="install" class="section">
+      <div class="wrap">
+        <p class="eyebrow">Installation</p>
+        <h2>Ready in under two minutes</h2>
+        <p class="section-lead">
+          Use the signed-style Windows Inno Setup installer for one-click setup with optional ViGEmBus, HidHide, and usbip-win2 drivers, or build directly from source.
+        </p>
+
+        <div class="install-grid">
+          <div class="panel">
+            <h3>Windows Setup Installer (Recommended)</h3>
+            <p style="font-size: 0.9rem; color: var(--ink-secondary);">
+              Download <code>dualsense-studio-v0.2.0-windows-x86_64-setup.exe</code> from GitHub Releases. Includes System Tray integration, single-instance guard, and auto-updater.
+            </p>
+            <pre class="code-block"># Launch quiet in Windows System Tray
+dualsense-studio.exe --tray
+
+# Or open the Studio UI immediately
+dualsense-studio.exe --open-ui</pre>
+          </div>
+
+          <div class="panel">
+            <h3>Linux &amp; Build from Source</h3>
+            <p style="font-size: 0.9rem; color: var(--ink-secondary);">
+              Requires Rust stable, Node.js 22+, and <code>libudev-dev</code> on Linux.
+            </p>
+            <pre class="code-block">cd frontend && npm ci && npm run build && cd ..
+cargo build --workspace --release
+./packaging/linux/install.sh</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="docs" class="section">
+      <div class="wrap">
+        <p class="eyebrow">Documentation</p>
+        <h2>Guides, drivers &amp; API reference</h2>
+
+        <h3 class="links-title">Setup &amp; Reference</h3>
+        <div class="links">
+          <a href="https://github.com/marcoswferreira/dualsense-studio/blob/main/docs/INSTALLATION.md">
+            <b>Installation &amp; Drivers</b>
+            <span>ViGEmBus, HidHide, usbip-win2, Linux udev rules, and unattended flags.</span>
+          </a>
+          <a href="https://github.com/marcoswferreira/dualsense-studio/blob/main/docs/USER_GUIDE.md">
+            <b>User Guide &amp; HTTP API</b>
+            <span>System Tray controls, CLI flags, SSE endpoints, and emulation protocols.</span>
+          </a>
+          <a href="https://github.com/marcoswferreira/dualsense-studio/blob/main/README.md">
+            <b>Project README</b>
+            <span>Full feature overview, architecture summary, and build instructions.</span>
+          </a>
+        </div>
+
+        <h3 class="links-title">Releases &amp; Community</h3>
+        <div class="links">
+          <a href="https://github.com/marcoswferreira/dualsense-studio/releases/tag/v0.2.0">
+            <b>Download v0.2.0</b>
+            <span>Windows Setup (.exe), portable (.zip), Linux (.tar.gz), and SHA256SUMS.</span>
+          </a>
+          <a href="https://github.com/marcoswferreira/dualsense-studio/actions">
+            <b>CI &amp; Release Workflows</b>
+            <span>Automated formatting, Clippy, 80+ workspace tests, and release packaging.</span>
+          </a>
+          <a href="https://github.com/marcoswferreira/dualsense-studio/issues">
+            <b>Issues &amp; Diagnostics</b>
+            <span>Report bugs with your one-click Copy Diagnostics bundle.</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <p>
+        DualSense Studio is free and open-source software licensed under GPL-3.0-or-later. Built in Rust and React for PlayStation 5 DualSense &amp; DualSense Edge controllers.
+      </p>
+      <p>
+        <a href="https://github.com/marcoswferreira/dualsense-studio">GitHub</a> ·
+        <a href="https://github.com/marcoswferreira/dualsense-studio/releases">Releases</a> ·
+        <a href="https://github.com/marcoswferreira/dualsense-studio/blob/main/docs/USER_GUIDE.md">User Guide</a> ·
+        <a href="https://github.com/marcoswferreira/dualsense-studio/blob/main/docs/INSTALLATION.md">Driver Setup</a>
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      const stage = document.getElementById('lightbar-stage');
+      const label = document.getElementById('lightbar-label');
+      const swatches = document.querySelectorAll('.swatch');
+      if (!stage || !label) return;
+      swatches.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const color = btn.getAttribute('data-color') || '#3b82f6';
+          const text = btn.getAttribute('data-label') || '';
+          stage.style.setProperty('--lb-color', color);
+          label.textContent = text;
+          swatches.forEach((b) => b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'));
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

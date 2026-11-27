@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Gamepad2, Plug, Unplug, Vibrate, Zap } from 'lucide-react';
+import { Activity, Gamepad2, Vibrate } from 'lucide-react';
 import { useTranslation } from '../../i18n';
 import {
   backendInputToLiveGamepad,
   BackendInputResponse,
   pollStandardGamepad,
   triggerHapticRumble,
-  webHidController,
   LiveGamepadState,
-  WebHidDualSenseController,
 } from '../../utils/dualsenseHardware';
 
 interface Props {
@@ -65,17 +63,12 @@ export const ControllerTester: React.FC<Props> = ({
   const { t, lang } = useTranslation();
   const [browserGamepad, setBrowserGamepad] = useState<LiveGamepadState | null>(null);
   const [backendGamepad, setBackendGamepad] = useState<LiveGamepadState | null>(null);
-  const [isWebHidConnected, setIsWebHidConnected] = useState(webHidController.isConnected());
-  const [webHidName, setWebHidName] = useState(webHidController.getDeviceName());
-  const isWebHidAvailable = WebHidDualSenseController.isSupported();
 
   // Poll Browser Gamepad API via requestAnimationFrame
   useEffect(() => {
     let animId: number;
     const poll = () => {
       setBrowserGamepad(pollStandardGamepad());
-      setIsWebHidConnected(webHidController.isConnected());
-      setWebHidName(webHidController.getDeviceName());
       animId = requestAnimationFrame(poll);
     };
     animId = requestAnimationFrame(poll);
@@ -117,23 +110,6 @@ export const ControllerTester: React.FC<Props> = ({
 
   const liveGamepad = backendGamepad ?? browserGamepad;
 
-  const handleConnectWebHid = async () => {
-    const ok = await webHidController.connect();
-    if (ok) {
-      setIsWebHidConnected(true);
-      setWebHidName(webHidController.getDeviceName());
-      onShowToast?.(t('toast_webhid_connected'));
-    } else {
-      onShowToast?.(t('toast_webhid_failed'));
-    }
-  };
-
-  const handleDisconnectWebHid = async () => {
-    await webHidController.disconnect();
-    setIsWebHidConnected(false);
-    onShowToast?.(t('toast_webhid_disconnected'));
-  };
-
   const handleTestRumble = async () => {
     // Prefer direct Rust backend HID rumble when the physical DualSense is connected
     if (isBackendConnected && onBackendRumble) {
@@ -160,18 +136,6 @@ export const ControllerTester: React.FC<Props> = ({
           <p className="page-subtitle">{t('dualsense_tester_subtitle')}</p>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          {isWebHidAvailable &&
-            (isWebHidConnected ? (
-              <button className="btn danger" onClick={handleDisconnectWebHid}>
-                <Unplug size={14} />
-                {t('dualsense_disconnect_webhid')}
-              </button>
-            ) : (
-              <button className="btn primary" onClick={handleConnectWebHid}>
-                <Plug size={14} />
-                {t('dualsense_connect_webhid')}
-              </button>
-            ))}
           <button className="btn" onClick={handleTestRumble}>
             <Vibrate size={14} />
             {t('dualsense_test_rumble')}
@@ -191,14 +155,6 @@ export const ControllerTester: React.FC<Props> = ({
                 : isHardwareConnected
                   ? `${controllerName || 'DualSense'} (${lang === 'pt' ? 'Conectado' : 'Connected'})`
                   : t('dualsense_tester_no_gamepad')}
-          </span>
-          <span className={`chip ${isWebHidConnected ? 'accent' : ''}`}>
-            <Zap size={12} />
-            {isWebHidConnected
-              ? `WebHID: ${webHidName}`
-              : isWebHidAvailable
-                ? t('dualsense_webhid_standby')
-                : t('dualsense_webhid_unsupported')}
           </span>
         </div>
       </div>

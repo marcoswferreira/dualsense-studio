@@ -37,7 +37,6 @@ import { HapticsAudioStudio } from './HapticsAudioStudio';
 import { UdpServerStudio } from './UdpServerStudio';
 import { GameProfilesStudio } from './GameProfilesStudio';
 import { ControllerTester } from './ControllerTester';
-import { webHidController, WebHidDualSenseController } from '../../utils/dualsenseHardware';
 
 type SubTab =
   | 'tester'
@@ -131,27 +130,12 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
   const { t, lang, toggleLang } = useTranslation();
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('tester');
   const [status, setStatus] = useState<DualSenseStatus | null>(null);
-  const [isWebHidConnected, setIsWebHidConnected] = useState(webHidController.isConnected());
   const [updateInfo, setUpdateInfo] = useState<{
     update_available: boolean;
     latest_version: string;
     current_version: string;
   } | null>(null);
   const [updatingApp, setUpdatingApp] = useState(false);
-
-  useEffect(() => {
-    webHidController.onDisconnect(() => {
-      setIsWebHidConnected(false);
-      onShowToast?.(t('toast_webhid_disconnected'));
-    });
-    const timer = window.setInterval(() => {
-      setIsWebHidConnected(webHidController.isConnected());
-    }, 900);
-    return () => {
-      webHidController.onDisconnect(null);
-      window.clearInterval(timer);
-    };
-  }, [onShowToast, t]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -243,7 +227,7 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
   );
 
   const currentStatus = status ?? DEFAULT_STATUS;
-  const isHardwareConnected = currentStatus.connected || isWebHidConnected;
+  const isHardwareConnected = currentStatus.connected;
 
   const ambientColor = useMemo(() => {
     const lb = currentStatus.lighting.lightbar;
@@ -254,34 +238,11 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
     return '#3b82f6';
   }, [currentStatus.lighting.lightbar]);
 
-  const handleConnectWebHid = async () => {
-    const ok = await webHidController.connect();
-    setIsWebHidConnected(ok);
-    if (ok) {
-      onShowToast?.(t('toast_webhid_connected'));
-      await webHidController.sendReport(currentStatus.triggers, currentStatus.lighting);
-    } else {
-      onShowToast?.(t('toast_webhid_failed'));
-    }
-  };
-
-  const handleDisconnectWebHid = async () => {
-    await webHidController.disconnect();
-    setIsWebHidConnected(false);
-    onShowToast?.(t('toast_webhid_disconnected'));
-  };
-
   const handleApplyTriggers = async (triggers: DualTriggerConfig) => {
-    if (webHidController.isConnected()) {
-      await webHidController.sendReport(triggers, currentStatus.lighting);
-    }
     await postJson('/api/dualsense/trigger', triggers, t('toast_dualsense_triggers_applied'));
   };
 
   const handleApplyLighting = async (lighting: LightingConfig) => {
-    if (webHidController.isConnected()) {
-      await webHidController.sendReport(currentStatus.triggers, lighting);
-    }
     await postJson('/api/dualsense/lightbar', lighting, t('toast_dualsense_lighting_applied'));
   };
 
@@ -294,11 +255,9 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
 
   const displayControllerName = currentStatus.connected
     ? currentStatus.name
-    : isWebHidConnected
-      ? 'Sony DualSense (WebHID)'
-      : lang === 'pt'
-        ? 'Aguardando Controle DualSense'
-        : 'Waiting for DualSense Controller';
+    : lang === 'pt'
+      ? 'Aguardando Controle DualSense'
+      : 'Waiting for DualSense Controller';
 
   const navItems: { id: SubTab; label: string; icon: React.ReactNode; badge?: string; activeBadge?: boolean }[] = [
     {
@@ -484,17 +443,6 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
           </div>
 
           <div className="topbar-actions">
-            {WebHidDualSenseController.isSupported() && (
-              <button
-                type="button"
-                aria-pressed={isWebHidConnected}
-                className={`btn sm ${isWebHidConnected ? 'primary' : ''}`}
-                onClick={isWebHidConnected ? handleDisconnectWebHid : handleConnectWebHid}
-              >
-                <Zap size={13} aria-hidden="true" />
-                {isWebHidConnected ? 'WebHID ON' : 'WebHID'}
-              </button>
-            )}
             <button
               type="button"
               aria-pressed={currentStatus.mic_muted}

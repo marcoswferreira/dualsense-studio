@@ -272,6 +272,7 @@ mod windows_tray {
     const ID_TOGGLE_CEMUHOOK: usize = 1022;
     const ID_TOGGLE_AUTOSTART: usize = 1023;
     const ID_CHECK_UPDATES: usize = 1030;
+    const ID_OPEN_LOGS: usize = 1031;
     const ID_QUIT: usize = 1099;
 
     const TIMER_REFRESH_ID: usize = 1;
@@ -544,6 +545,7 @@ mod windows_tray {
             let cemu_txt = to_wide("Cemuhook Motion Server (DSU)");
             let auto_txt = to_wide("Start with Windows (Tray)");
             let update_txt = to_wide("Check for Updates...");
+            let logs_txt = to_wide("Open Logs...");
             let quit_txt = to_wide("Quit DualSense Studio");
 
             AppendMenuW(menu, MF_STRING, ID_OPEN_UI, open_txt.as_ptr());
@@ -583,6 +585,7 @@ mod windows_tray {
             AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
             AppendMenuW(menu, auto_flags, ID_TOGGLE_AUTOSTART, auto_txt.as_ptr());
             AppendMenuW(menu, MF_STRING, ID_CHECK_UPDATES, update_txt.as_ptr());
+            AppendMenuW(menu, MF_STRING, ID_OPEN_LOGS, logs_txt.as_ptr());
             AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
             AppendMenuW(menu, MF_STRING, ID_QUIT, quit_txt.as_ptr());
 
@@ -708,6 +711,32 @@ mod windows_tray {
                         let msg = to_wide(&format!("Could not check for updates: {e}"));
                         unsafe {
                             MessageBoxW(hwnd, msg.as_ptr(), title.as_ptr(), MB_OK | MB_ICONWARNING);
+                        }
+                    }
+                }
+            }
+            ID_OPEN_LOGS => {
+                if let Some(dir) = ctx.config_path.parent() {
+                    let log_path = dir.join("dualsense-studio.log");
+                    if log_path.exists() {
+                        use std::os::windows::process::CommandExt;
+                        let _ = std::process::Command::new("notepad.exe")
+                            .arg(&log_path)
+                            .creation_flags(0x0800_0000)
+                            .spawn();
+                    } else {
+                        let title = to_wide("DualSense Studio - Logs");
+                        let msg = to_wide(&format!(
+                            "No log file found yet at:\n{}",
+                            log_path.display()
+                        ));
+                        unsafe {
+                            MessageBoxW(
+                                hwnd,
+                                msg.as_ptr(),
+                                title.as_ptr(),
+                                MB_OK | MB_ICONINFORMATION,
+                            );
                         }
                     }
                 }

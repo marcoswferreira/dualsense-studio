@@ -14,6 +14,7 @@ interface Props {
   isHardwareConnected?: boolean;
   isBackendConnected?: boolean;
   controllerName?: string;
+  streamGamepad?: LiveGamepadState | null;
   onBackendRumble?: () => void;
 }
 
@@ -58,14 +59,20 @@ export const ControllerTester: React.FC<Props> = ({
   isHardwareConnected = false,
   isBackendConnected = false,
   controllerName,
+  streamGamepad,
   onBackendRumble,
 }) => {
   const { t, lang } = useTranslation();
   const [browserGamepad, setBrowserGamepad] = useState<LiveGamepadState | null>(null);
-  const [backendGamepad, setBackendGamepad] = useState<LiveGamepadState | null>(null);
+  const [polledGamepad, setPolledGamepad] = useState<LiveGamepadState | null>(null);
+  const backendGamepad = streamGamepad !== undefined ? streamGamepad : polledGamepad;
 
-  // Poll Browser Gamepad API via requestAnimationFrame
+  // Poll Browser Gamepad API only when backend Live HID is not active
   useEffect(() => {
+    if (backendGamepad?.connected) {
+      setBrowserGamepad(null);
+      return;
+    }
     let animId: number;
     const poll = () => {
       setBrowserGamepad(pollStandardGamepad());
@@ -73,10 +80,11 @@ export const ControllerTester: React.FC<Props> = ({
     };
     animId = requestAnimationFrame(poll);
     return () => cancelAnimationFrame(animId);
-  }, []);
+  }, [backendGamepad?.connected]);
 
-  // Poll live physical HID telemetry directly from Rust backend (/api/dualsense/input) at ~25 Hz
+  // Fallback polling only if SSE stream prop is not provided
   useEffect(() => {
+    if (streamGamepad !== undefined) return;
     let cancelled = false;
     let inFlight = false;
 
@@ -87,26 +95,22 @@ export const ControllerTester: React.FC<Props> = ({
         const res = await fetch('/api/dualsense/input');
         if (res.ok && !cancelled) {
           const data: BackendInputResponse = await res.json();
-          if (data.connected) {
-            setBackendGamepad(backendInputToLiveGamepad(data));
-          } else {
-            setBackendGamepad(null);
-          }
+          setPolledGamepad(data.connected ? backendInputToLiveGamepad(data) : null);
         }
       } catch {
-        if (!cancelled) setBackendGamepad(null);
+        if (!cancelled) setPolledGamepad(null);
       } finally {
         inFlight = false;
       }
     };
 
     void pollBackend();
-    const timer = window.setInterval(() => void pollBackend(), 40);
+    const timer = window.setInterval(() => void pollBackend(), 100);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [streamGamepad]);
 
   const liveGamepad = backendGamepad ?? browserGamepad;
 

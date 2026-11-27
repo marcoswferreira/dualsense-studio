@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -87,6 +88,7 @@ pub async fn start_http_server_with_config_and_shutdown(
 
     let cfg_path = Arc::new(config_path);
     let shutdown_arc = Arc::new(shutdown_tx);
+    let persist_gen = Arc::new(AtomicU64::new(0));
 
     let handle = tokio::spawn(async move {
         loop {
@@ -95,8 +97,9 @@ pub async fn start_http_server_with_config_and_shutdown(
                     let mgr = manager.clone();
                     let path = cfg_path.clone();
                     let sd = shutdown_arc.clone();
+                    let pg = persist_gen.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_connection(stream, mgr, path, sd).await {
+                        if let Err(e) = handle_connection(stream, mgr, path, sd, pg).await {
                             debug!("HTTP connection error: {}", e);
                         }
                     });
@@ -213,11 +216,83 @@ async fn persist_if_configured(manager: &Arc<DualSenseManager>, config_path: &Op
     }
 }
 
+fn schedule_debounced_persist(
+    manager: &Arc<DualSenseManager>,
+    config_path: &Option<PathBuf>,
+    persist_gen: &Arc<AtomicU64>,
+) {
+    let Some(path) = config_path.clone() else {
+        return;
+    };
+    let my_gen = persist_gen.fetch_add(1, Ordering::SeqCst) + 1;
+    let mgr = manager.clone();
+    let gen_ref = persist_gen.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        if gen_ref.load(Ordering::SeqCst) == my_gen {
+            let cfg = mgr.export_config().await;
+            if let Err(e) = cfg.save_to_path(&path) {
+                warn!("Failed to persist config to {}: {}", path.display(), e);
+            }
+        }
+    });
+}
+
+async fn handle_sse_stream(mut stream: TcpStream, manager: Arc<DualSenseManager>) -> Result<()> {
+    let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\nConnection: keep-alive\r\n\r\n";
+    stream.write_all(headers.as_bytes()).await?;
+    stream.flush().await?;
+
+    let mut last_connected: Option<bool> = None;
+    let mut last_input: Option<dualsense_core::DualSenseInputState> = None;
+    let mut last_status_at = std::time::Instant::now() - std::time::Duration::from_secs(5);
+    let mut tick = tokio::time::interval(std::time::Duration::from_millis(40));
+
+    loop {
+        tick.tick().await;
+        let connected = manager.is_connected();
+        let current_input = manager.get_input_state();
+        let connection_changed = last_connected != Some(connected);
+        let input_changed = last_input.as_ref() != Some(&current_input);
+
+        if connection_changed || input_changed {
+            last_input = Some(current_input.clone());
+            let input_payload = json!({
+                "connected": connected,
+                "name": manager.controller_name(),
+                "input": current_input,
+            });
+            let frame = format!("event: input\ndata: {input_payload}\n\n");
+            if stream.write_all(frame.as_bytes()).await.is_err() {
+                break;
+            }
+        }
+
+        if connection_changed || last_status_at.elapsed() >= std::time::Duration::from_secs(1) {
+            last_connected = Some(connected);
+            last_status_at = std::time::Instant::now();
+            let status = manager.get_status().await;
+            if let Ok(json_str) = serde_json::to_string(&status) {
+                let frame = format!("event: status\ndata: {json_str}\n\n");
+                if stream.write_all(frame.as_bytes()).await.is_err() {
+                    break;
+                }
+            }
+        }
+
+        if stream.flush().await.is_err() {
+            break;
+        }
+    }
+    Ok(())
+}
+
 async fn handle_connection(
     mut stream: TcpStream,
     manager: Arc<DualSenseManager>,
     config_path: Arc<Option<PathBuf>>,
     shutdown_tx: Arc<Option<watch::Sender<bool>>>,
+    persist_gen: Arc<AtomicU64>,
 ) -> Result<()> {
     let mut buf = Vec::with_capacity(4096);
     let mut chunk = [0u8; 2048];
@@ -293,8 +368,20 @@ async fn handle_connection(
     let body_end = (body_start + content_length).min(buf.len());
     let body = &buf[body_start..body_end];
 
-    let (status, reason, content_type, resp_body) =
-        route_request(&method, &path, body, &manager, &config_path, &shutdown_tx).await;
+    if method == "GET" && path == "/api/dualsense/stream" {
+        return handle_sse_stream(stream, manager).await;
+    }
+
+    let (status, reason, content_type, resp_body) = route_request(
+        &method,
+        &path,
+        body,
+        &manager,
+        &config_path,
+        &shutdown_tx,
+        &persist_gen,
+    )
+    .await;
     write_response(&mut stream, status, reason, content_type, &resp_body).await?;
     Ok(())
 }
@@ -310,6 +397,7 @@ async fn route_request(
     manager: &Arc<DualSenseManager>,
     config_path: &Option<PathBuf>,
     shutdown_tx: &Option<watch::Sender<bool>>,
+    persist_gen: &Arc<AtomicU64>,
 ) -> (u16, &'static str, &'static str, Vec<u8>) {
     if method == "OPTIONS" {
         return (204, "No Content", "text/plain", Vec::new());
@@ -332,7 +420,7 @@ async fn route_request(
             match serde_json::from_slice::<DualTriggerConfig>(body) {
                 Ok(triggers) => {
                     manager.set_triggers(triggers);
-                    persist_if_configured(manager, config_path).await;
+                    schedule_debounced_persist(manager, config_path, persist_gen);
                     json_response(200, "OK", &json!({ "ok": true }))
                 }
                 Err(e) => json_response(400, "Bad Request", &json!({ "error": e.to_string() })),
@@ -342,7 +430,7 @@ async fn route_request(
         {
             Ok(lighting) => {
                 manager.set_lighting(lighting);
-                persist_if_configured(manager, config_path).await;
+                schedule_debounced_persist(manager, config_path, persist_gen);
                 json_response(200, "OK", &json!({ "ok": true }))
             }
             Err(e) => json_response(400, "Bad Request", &json!({ "error": e.to_string() })),

@@ -13,20 +13,13 @@ export const pt = {
   dualsense_subtab_udp: 'Link UDP',
   dualsense_subtab_profiles: 'Perfis de Jogos',
 
-  // Controller Tester & WebHID
+  // Controller Tester
   dualsense_tester_title: 'Testador de Hardware DualSense & DualSense Edge',
-  dualsense_tester_subtitle: 'Telemetria em tempo real, teste de vibração háptica e ponte direta WebHID.',
+  dualsense_tester_subtitle: 'Telemetria HID em tempo real e teste de vibração háptica.',
   dualsense_tester_no_gamepad: 'Nenhum controle detectado. Pressione qualquer botão para ativar.',
-  dualsense_webhid_standby: 'Ponte Direta WebHID Pronta',
-  dualsense_webhid_unsupported: 'WebHID não suportado neste navegador (Use Chrome ou Edge)',
-  dualsense_connect_webhid: 'Conectar via WebHID',
-  dualsense_disconnect_webhid: 'Desconectar WebHID',
   dualsense_test_rumble: 'Testar Vibração',
   dualsense_tester_analog_sticks: 'Analógicos & Gatilhos',
   dualsense_tester_buttons: 'Botões & D-Pad',
-  toast_webhid_connected: 'DualSense conectado diretamente via WebHID!',
-  toast_webhid_failed: 'Não foi possível conectar via WebHID.',
-  toast_webhid_disconnected: 'WebHID desconectado.',
   toast_rumble_tested: 'Comando de vibração enviado ao controle!',
   toast_rumble_failed: 'Atuador de vibração não disponível.',
 

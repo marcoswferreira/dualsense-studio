@@ -37,6 +37,11 @@ import { HapticsAudioStudio } from './HapticsAudioStudio';
 import { UdpServerStudio } from './UdpServerStudio';
 import { GameProfilesStudio } from './GameProfilesStudio';
 import { ControllerTester } from './ControllerTester';
+import {
+  backendInputToLiveGamepad,
+  BackendInputResponse,
+  LiveGamepadState,
+} from '../../utils/dualsenseHardware';
 
 type SubTab =
   | 'tester'
@@ -130,6 +135,7 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
   const { t, lang, toggleLang } = useTranslation();
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('tester');
   const [status, setStatus] = useState<DualSenseStatus | null>(null);
+  const [liveInput, setLiveInput] = useState<LiveGamepadState | null>(null);
   const [updateInfo, setUpdateInfo] = useState<{
     update_available: boolean;
     latest_version: string;
@@ -151,7 +157,27 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
 
   useEffect(() => {
     void fetchStatus();
-    const interval = window.setInterval(() => void fetchStatus(), 1000);
+    if (typeof EventSource !== 'undefined') {
+      const es = new EventSource('/api/dualsense/stream');
+      es.addEventListener('status', (ev) => {
+        try {
+          const data: DualSenseStatus = JSON.parse((ev as MessageEvent).data);
+          setStatus(data);
+        } catch {
+          // Ignore malformed SSE frame
+        }
+      });
+      es.addEventListener('input', (ev) => {
+        try {
+          const data: BackendInputResponse = JSON.parse((ev as MessageEvent).data);
+          setLiveInput(data.connected ? backendInputToLiveGamepad(data) : null);
+        } catch {
+          // Ignore malformed SSE frame
+        }
+      });
+      return () => es.close();
+    }
+    const interval = window.setInterval(() => void fetchStatus(), 1500);
     return () => window.clearInterval(interval);
   }, [fetchStatus]);
 
@@ -511,6 +537,7 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
                     isHardwareConnected={isHardwareConnected}
                     isBackendConnected={currentStatus.connected}
                     controllerName={displayControllerName}
+                    streamGamepad={liveInput}
                     onBackendRumble={() =>
                       void postJson(
                         '/api/dualsense/rumble',

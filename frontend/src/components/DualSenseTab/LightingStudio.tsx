@@ -48,11 +48,34 @@ export const LightingStudio: React.FC<Props> = ({ lighting: initialLighting, onA
     }
   }, [initialLighting]);
 
+  const colorTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (colorTimer.current !== null) {
+        window.clearTimeout(colorTimer.current);
+      }
+    };
+  }, []);
+
   const commit = (updated: LightingConfig) => {
     localEditUntil.current = Date.now() + 1200;
     lastRemoteJson.current = JSON.stringify(updated);
     setLighting(updated);
     onApply(updated);
+  };
+
+  const commitThrottled = (updated: LightingConfig) => {
+    localEditUntil.current = Date.now() + 1200;
+    lastRemoteJson.current = JSON.stringify(updated);
+    setLighting(updated);
+    if (colorTimer.current !== null) {
+      window.clearTimeout(colorTimer.current);
+    }
+    colorTimer.current = window.setTimeout(() => {
+      colorTimer.current = null;
+      onApply(updated);
+    }, 60);
   };
 
   const activeColor: RgbColor =
@@ -184,7 +207,7 @@ export const LightingStudio: React.FC<Props> = ({ lighting: initialLighting, onA
                     g: parseInt(hex.substring(2, 4), 16),
                     b: parseInt(hex.substring(4, 6), 16),
                   };
-                  commit({ ...lighting, lightbar: { mode: 'static', color } });
+                  commitThrottled({ ...lighting, lightbar: { mode: 'static', color } });
                 }}
                 style={{ width: '38px', height: '30px', border: 'none', background: 'none', cursor: 'pointer' }}
               />

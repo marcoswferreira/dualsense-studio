@@ -1,7 +1,8 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use dualsense_app::process_watcher::ProcessProfileWatcher;
@@ -15,7 +16,66 @@ use dualsense_app::tray::{hide_console_window_if_windows, open_browser, TrayHand
 use dualsense_app::updater::check_for_updates;
 use dualsense_core::{default_config_path, AppConfig, DualSenseManager, HidDeviceWorker};
 use tracing::{info, warn};
+use tracing_subscriber::fmt::writer::MakeWriter;
 use tracing_subscriber::EnvFilter;
+
+#[derive(Clone)]
+struct TeeLogWriter {
+    file: Option<Arc<Mutex<std::fs::File>>>,
+}
+
+struct TeeGuard {
+    file: Option<Arc<Mutex<std::fs::File>>>,
+}
+
+impl Write for TeeGuard {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let _ = std::io::stdout().write(buf);
+        if let Some(f) = &self.file {
+            if let Ok(mut guard) = f.lock() {
+                let _ = guard.write_all(buf);
+            }
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let _ = std::io::stdout().flush();
+        if let Some(f) = &self.file {
+            if let Ok(mut guard) = f.lock() {
+                let _ = guard.flush();
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<'a> MakeWriter<'a> for TeeLogWriter {
+    type Writer = TeeGuard;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        TeeGuard {
+            file: self.file.clone(),
+        }
+    }
+}
+
+fn open_log_file(config_path: &Path) -> Option<Arc<Mutex<std::fs::File>>> {
+    let dir = config_path.parent()?;
+    std::fs::create_dir_all(dir).ok()?;
+    let log_path = dir.join("dualsense-studio.log");
+    let truncate = std::fs::metadata(&log_path)
+        .map(|m| m.len() > 1024 * 1024)
+        .unwrap_or(false);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(truncate)
+        .append(!truncate)
+        .open(log_path)
+        .ok()?;
+    Some(Arc::new(Mutex::new(file)))
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -24,8 +84,19 @@ async fn main() -> Result<()> {
         hide_console_window_if_windows();
     }
 
+    let config_path: PathBuf = std::env::var("DUALSENSE_CONFIG_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| default_config_path());
+
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    let log_writer = TeeLogWriter {
+        file: open_log_file(&config_path),
+    };
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_ansi(false)
+        .with_writer(log_writer)
+        .init();
 
     info!("Starting DualSense Studio v0.1.0 (Standalone Mode)...");
 
@@ -44,9 +115,6 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let config_path: PathBuf = std::env::var("DUALSENSE_CONFIG_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| default_config_path());
     let persisted = AppConfig::load_from_path(&config_path);
 
     let manager = Arc::new(DualSenseManager::new());

@@ -3,6 +3,7 @@ import {
   BatteryCharging,
   BatteryFull,
   Bluetooth,
+  ClipboardCopy,
   Cpu,
   Download,
   FolderKanban,
@@ -158,7 +159,8 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
   useEffect(() => {
     void fetchStatus();
     if (typeof EventSource !== 'undefined') {
-      const es = new EventSource('/api/dualsense/stream');
+      let fallbackTimer: number | null = null;
+      const es = new EventSource('/api/dualsense/events');
       es.addEventListener('status', (ev) => {
         try {
           const data: DualSenseStatus = JSON.parse((ev as MessageEvent).data);
@@ -175,7 +177,23 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
           // Ignore malformed SSE frame
         }
       });
-      return () => es.close();
+      es.onerror = () => {
+        if (fallbackTimer === null) {
+          fallbackTimer = window.setInterval(() => void fetchStatus(), 2000);
+        }
+      };
+      es.onopen = () => {
+        if (fallbackTimer !== null) {
+          window.clearInterval(fallbackTimer);
+          fallbackTimer = null;
+        }
+      };
+      return () => {
+        es.close();
+        if (fallbackTimer !== null) {
+          window.clearInterval(fallbackTimer);
+        }
+      };
     }
     const interval = window.setInterval(() => void fetchStatus(), 1500);
     return () => window.clearInterval(interval);
@@ -423,10 +441,42 @@ export const DualSenseTab: React.FC<Props> = ({ onShowToast }) => {
                   ? lang === 'pt'
                     ? `Atualizar ${updateInfo.latest_version}`
                     : `Update ${updateInfo.latest_version}`
-                  : lang === 'pt'
+                    : lang === 'pt'
                     ? 'Verificar atualizações'
                     : 'Check for updates'}
             </span>
+          </button>
+
+          <button
+            type="button"
+            className="btn"
+            style={{ width: '100%' }}
+            onClick={() => {
+              void (async () => {
+                try {
+                  const res = await fetch('/api/app/logs');
+                  const logsData = res.ok ? await res.json() : { path: '', lines: [] };
+                  const snapshot = {
+                    status: status ?? DEFAULT_STATUS,
+                    log_path: logsData.path ?? '',
+                    recent_logs: logsData.lines ?? [],
+                  };
+                  await navigator.clipboard.writeText(JSON.stringify(snapshot, null, 2));
+                  onShowToast?.(
+                    lang === 'pt' ? 'Diagnóstico copiado!' : 'Diagnostics copied to clipboard!'
+                  );
+                } catch {
+                  onShowToast?.(
+                    lang === 'pt'
+                      ? 'Falha ao copiar diagnóstico'
+                      : 'Failed to copy diagnostics'
+                  );
+                }
+              })();
+            }}
+          >
+            <ClipboardCopy size={14} aria-hidden="true" />
+            <span>{lang === 'pt' ? 'Copiar Diagnóstico' : 'Copy Diagnostics'}</span>
           </button>
         </div>
       </aside>

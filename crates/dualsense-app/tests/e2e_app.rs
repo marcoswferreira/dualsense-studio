@@ -375,6 +375,25 @@ async fn e2e_http_api_full_lifecycle() {
     assert!(!manager.is_extension_enabled());
     assert!(manager.is_autostart_enabled());
 
+    // 9. GET /api/app/logs
+    let (code, logs_body) = send_http_request(addr, "GET", "/api/app/logs", None).await;
+    assert_eq!(code, 200);
+    assert!(logs_body.contains("\"lines\":"));
+
+    // 10. GET /api/dualsense/events (SSE stream)
+    let mut sse_stream = TcpStream::connect(addr).await.expect("connect SSE");
+    sse_stream
+        .write_all(b"GET /api/dualsense/events HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .expect("write SSE request");
+    let mut sse_buf = vec![0u8; 2048];
+    let n = tokio::time::timeout(Duration::from_secs(2), sse_stream.read(&mut sse_buf))
+        .await
+        .expect("SSE headers timeout")
+        .expect("read SSE headers");
+    let sse_head = String::from_utf8_lossy(&sse_buf[..n]);
+    assert!(sse_head.contains("text/event-stream"));
+
     server_handle.abort();
 }
 

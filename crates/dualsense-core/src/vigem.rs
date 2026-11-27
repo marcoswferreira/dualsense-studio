@@ -109,6 +109,58 @@ pub fn is_hidhide_driver_installed() -> bool {
     }
 }
 
+/// Locates Nefarius `HidHideCLI.exe` if installed on Windows.
+pub fn find_hidhide_cli() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(pf) = std::env::var("ProgramFiles") {
+            let p = std::path::PathBuf::from(pf)
+                .join(r"Nefarius Software Solutions\HidHide\x64\HidHideCLI.exe");
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+/// Synchronizes HidHide cloaking state for DualSense Studio when switching emulation modes.
+pub fn sync_hidhide_for_emulation(cloak_on: bool) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let Some(cli) = find_hidhide_cli() else {
+            return;
+        };
+        if cloak_on {
+            if let Ok(exe) = std::env::current_exe() {
+                let _ = std::process::Command::new(&cli)
+                    .args(["--app-reg", &exe.to_string_lossy()])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .output();
+            }
+            let _ = std::process::Command::new(&cli)
+                .arg("--cloak-on")
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
+        } else {
+            let _ = std::process::Command::new(&cli)
+                .arg("--cloak-off")
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = cloak_on;
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ViGEmPluginTarget {
@@ -948,5 +1000,11 @@ mod tests {
         assert_eq!(ds4.w_buttons & 0x0010, 0x0010); // Square
         assert_eq!(ds4.w_buttons & 0x0080, 0x0080); // Triangle
         assert_eq!(ds4.b_special & 0x01, 0x01); // PS button
+    }
+
+    #[test]
+    fn test_hidhide_cli_discovery_does_not_panic() {
+        let _ = find_hidhide_cli();
+        sync_hidhide_for_emulation(false);
     }
 }

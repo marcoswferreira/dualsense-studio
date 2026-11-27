@@ -368,7 +368,7 @@ async fn handle_connection(
     let body_end = (body_start + content_length).min(buf.len());
     let body = &buf[body_start..body_end];
 
-    if method == "GET" && path == "/api/dualsense/stream" {
+    if method == "GET" && (path == "/api/dualsense/stream" || path == "/api/dualsense/events") {
         return handle_sse_stream(stream, manager).await;
     }
 
@@ -689,6 +689,33 @@ async fn route_request(
                 &json!({ "ok": false, "error": e.to_string() }),
             ),
         },
+        ("GET", "/api/app/logs") => {
+            let log_path = config_path
+                .as_ref()
+                .and_then(|p| p.parent().map(|d| d.join("dualsense-studio.log")))
+                .unwrap_or_else(|| {
+                    dualsense_core::default_config_path()
+                        .parent()
+                        .map(|d| d.join("dualsense-studio.log"))
+                        .unwrap_or_else(|| PathBuf::from("dualsense-studio.log"))
+                });
+            let lines: Vec<String> = match std::fs::read_to_string(&log_path) {
+                Ok(contents) => {
+                    let all: Vec<&str> = contents.lines().collect();
+                    let start = all.len().saturating_sub(200);
+                    all[start..].iter().map(|s| (*s).to_string()).collect()
+                }
+                Err(_) => Vec::new(),
+            };
+            json_response(
+                200,
+                "OK",
+                &json!({
+                    "path": log_path.display().to_string(),
+                    "lines": lines,
+                }),
+            )
+        }
         ("GET", _) => serve_static_asset(path),
         _ => json_response(404, "Not Found", &json!({ "error": "not found" })),
     }

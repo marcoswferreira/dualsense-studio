@@ -12,10 +12,11 @@ Advanced PlayStation 5 DualSense & DualSense Edge controller suite, haptics & ad
 - **Native Windows System Tray**: Background tray icon with live controller status, one-click Web UI launch, quick profile switching, microphone mute toggle, DualSenseX/Cemuhook UDP toggles, and Windows login autostart.
 - **Adaptive Trigger Studio**: Real-time tuning and presets (`Off`, `Feedback`, `Weapon`, `Bow`, `Galloping`, `Machine`, `MachineGun`, `Vibration`, `CustomZone`, `GameCube`, and DualSenseX modes).
 - **Controller Emulation**:
-  - **Xbox 360 (XInput) & DualShock 4** via [ViGEmBus](https://github.com/nefarius/ViGEmBus) + optional [HidHide](https://github.com/nefarius/HidHide) to prevent double-input.
+  - **Xbox 360 (XInput) & DualShock 4** via [ViGEmBus](https://github.com/nefarius/ViGEmBus) + automatic [HidHide](https://github.com/nefarius/HidHide) cloaking (`HidHideCLI.exe`) when switching emulation modes to prevent double-input.
   - **Virtual DualSense** via `/dev/uhid` (Linux) or `usbip-win2` (Windows) with bidirectional game feedback.
-- **Input Mapping & Per-Game Profiles**: Stick deadzones/curves, hair-trigger thresholds, button remapping, touchpad mouse/split modes, gyro activation, and automatic process-based profile switching.
-- **Bluetooth HD Haptics (`0x32`) & Audio-to-Haptics**: Real-time 48 kHz to 3 kHz DSP pipeline.
+- **Input Mapping & Per-Game Profiles**: Stick deadzones/curves, hair-trigger thresholds, button remapping (including `NextProfile` cycling), touchpad OS mouse/split modes, gyro activation (`Always`, `Toggle`, trigger/touch) with EMA smoothing, and automatic process-based profile switching with restore-on-exit.
+- **Bluetooth HD Haptics (`0x32`) & Audio-to-Haptics**: Real-time OS loopback audio capture (Windows WASAPI / Linux `parec`) feeding a 48 kHz to 3 kHz DSP pipeline.
+- **Real-Time Telemetry & Diagnostics**: Server-Sent Events (`GET /api/dualsense/events`) for zero-jitter UI updates, rotating `dualsense-studio.log` diagnostics, and one-click **Copy Diagnostics** in the Web UI.
 - **Motion UDP Server (Cemuhook / DSU)** (`26760`) and **DualSenseX UDP Link** (`6969`).
 - **Lightbar RGB, Player LEDs & Audio**: Dynamic battery level indicators, breathing/rainbow effects, and hardware mic mute sync.
 

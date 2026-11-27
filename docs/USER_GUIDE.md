@@ -28,8 +28,10 @@ When launched with `--tray` (default for Start Menu and autostart shortcuts), Du
 
 ## Emulation & Protocols
 
-- **ViGEmBus (`Xbox360` / `DualShock4`)**: Maps sticks, triggers, buttons, D-pad HAT, and optional gyro-to-right-stick aiming, while forwarding rumble and DS4 lightbar feedback back to the physical DualSense.
+- **ViGEmBus (`Xbox360` / `DualShock4`)**: Maps sticks, triggers, buttons, D-pad HAT, and optional gyro-to-right-stick aiming, while forwarding rumble and DS4 lightbar feedback back to the physical DualSense. When `HidHideCLI.exe` is present, DualSense Studio automatically registers itself and enables/disables HidHide cloaking when switching between `Xbox360`/`DualShock4` and `Native`/`DualSense`.
 - **Virtual DualSense (`DualSense`)**: Uses `/dev/uhid` on Linux or `usbip-win2` on Windows to expose a full virtual DualSense HID device with bidirectional adaptive trigger, lightbar, and rumble feedback.
+- **Audio-to-Haptics Loopback**: Captures system loopback audio (WASAPI on Windows, `parec` on Linux) and streams 48 kHz stereo frames through the 3 kHz low-pass/envelope DSP into Bluetooth Report `0x32`.
+- **Per-Game Auto-Switch**: `ProcessProfileWatcher` monitors running executables, snapshots active triggers & lightbar before applying a game rule, and automatically restores them when the game exits.
 - **Cemuhook / DSU Motion UDP (`26760`)**: Streams 6-axis gyro and accelerometer telemetry to Cemu, Dolphin, Ryujinx, and Yuzu.
 - **DualSenseX UDP Link (`6969`)**: Accepts DualSenseX JSON instruction packets (triggers, RGB, player LEDs, rumble, reset) and publishes `%TEMP%\DualSenseX\DualSenseX_PortNumber.txt` when bound to a non-ephemeral port.
 
@@ -39,6 +41,8 @@ The Web UI communicates with the backend via `http://127.0.0.1:48080`:
 
 - `GET /api/dualsense/status` — Full controller, triggers, lighting, emulation, haptics, and server stats.
 - `GET /api/dualsense/input` — Live mapped controller input state (sticks, triggers, buttons, IMU, touchpad).
+- `GET /api/dualsense/events` (alias `/api/dualsense/stream`) — Server-Sent Events (SSE) stream pushing `input` and `status` updates with automatic polling fallback.
+- `GET /api/app/logs` — Returns the log file path (`dualsense-studio.log`) and up to the last 200 diagnostic log lines.
 - `POST /api/dualsense/trigger` — Configure left/right adaptive trigger effects.
 - `POST /api/dualsense/lightbar` — Configure lightbar mode/color, player LEDs, and mic LED.
 - `POST /api/dualsense/emulation` — Switch emulation mode (`native`, `xbox360`, `dualshock4`, `dualsense`) and gyro settings.

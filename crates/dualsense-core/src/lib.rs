@@ -1,4 +1,5 @@
 pub mod audio;
+pub mod audio_capture;
 pub mod cemuhook;
 pub mod device;
 pub mod emulation;

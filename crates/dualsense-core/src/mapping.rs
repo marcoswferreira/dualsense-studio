@@ -433,6 +433,125 @@ pub fn apply_input_mapping(
     out
 }
 
+/// Returns `true` if any physical button mapped to `ButtonAction::NextProfile` is currently pressed.
+pub fn has_next_profile_action_pressed(
+    raw: &DualSenseInputState,
+    cfg: &InputMappingConfig,
+) -> bool {
+    ALL_BUTTONS.iter().any(|&btn| {
+        read_button(raw, btn)
+            && matches!(cfg.button_remaps.get(&btn), Some(ButtonAction::NextProfile))
+    })
+}
+
+/// Applies exponential moving average smoothing to 3-axis gyro readings (`smoothing` in `0.0..=0.95`).
+pub fn smooth_gyro(
+    prev: [f32; 3],
+    curr: (i16, i16, i16),
+    smoothing: f32,
+) -> ([f32; 3], (i16, i16, i16)) {
+    let s = smoothing.clamp(0.0, 0.95);
+    if s <= 0.0 {
+        let exact = [curr.0 as f32, curr.1 as f32, curr.2 as f32];
+        return (exact, curr);
+    }
+    let alpha = 1.0 - s;
+    let nx = prev[0] + alpha * (curr.0 as f32 - prev[0]);
+    let ny = prev[1] + alpha * (curr.1 as f32 - prev[1]);
+    let nz = prev[2] + alpha * (curr.2 as f32 - prev[2]);
+    (
+        [nx, ny, nz],
+        (
+            nx.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+            ny.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+            nz.round().clamp(i16::MIN as f32, i16::MAX as f32) as i16,
+        ),
+    )
+}
+
+/// Dispatches relative OS mouse movement, left-click state, and scroll wheel events (Windows `SendInput`).
+pub fn dispatch_os_mouse(dx: i32, dy: i32, left_click_edge: Option<bool>, wheel_delta: i32) {
+    #[cfg(target_os = "windows")]
+    {
+        const INPUT_MOUSE: u32 = 0;
+        const MOUSEEVENTF_MOVE: u32 = 0x0001;
+        const MOUSEEVENTF_LEFTDOWN: u32 = 0x0002;
+        const MOUSEEVENTF_LEFTUP: u32 = 0x0004;
+        const MOUSEEVENTF_WHEEL: u32 = 0x0800;
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct MOUSEINPUT {
+            dx: i32,
+            dy: i32,
+            mouse_data: u32,
+            dw_flags: u32,
+            time: u32,
+            dw_extra_info: usize,
+        }
+
+        #[repr(C)]
+        union INPUTUNION {
+            mi: MOUSEINPUT,
+            _pad: [u8; 32],
+        }
+
+        #[repr(C)]
+        struct INPUT {
+            r#type: u32,
+            u: INPUTUNION,
+        }
+
+        #[link(name = "user32")]
+        extern "system" {
+            fn SendInput(c_inputs: u32, p_inputs: *const INPUT, cb_size: i32) -> u32;
+        }
+
+        let mut flags = 0u32;
+        if dx != 0 || dy != 0 {
+            flags |= MOUSEEVENTF_MOVE;
+        }
+        if let Some(down) = left_click_edge {
+            flags |= if down {
+                MOUSEEVENTF_LEFTDOWN
+            } else {
+                MOUSEEVENTF_LEFTUP
+            };
+        }
+        let mouse_data = if wheel_delta != 0 {
+            flags |= MOUSEEVENTF_WHEEL;
+            wheel_delta as u32
+        } else {
+            0
+        };
+
+        if flags == 0 {
+            return;
+        }
+
+        let input = INPUT {
+            r#type: INPUT_MOUSE,
+            u: INPUTUNION {
+                mi: MOUSEINPUT {
+                    dx,
+                    dy,
+                    mouse_data,
+                    dw_flags: flags,
+                    time: 0,
+                    dw_extra_info: 0,
+                },
+            },
+        };
+        unsafe {
+            SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (dx, dy, left_click_edge, wheel_delta);
+    }
+}
+
 /// Computes mouse cursor delta (dx, dy) from consecutive touchpad contact samples in Mouse mode
 pub fn compute_touchpad_mouse_delta(
     prev: &TouchPoint,
@@ -600,5 +719,27 @@ mod tests {
             y: 400,
         };
         assert!(compute_touchpad_mouse_delta(&p2, &p3, &cfg).is_none());
+    }
+
+    #[test]
+    fn test_smooth_gyro_ema_and_next_profile_detection() {
+        let (ema, smoothed) = smooth_gyro([0.0f32; 3], (1000, -500, 200), 0.5);
+        assert_eq!(smoothed, (500, -250, 100));
+        assert_eq!(ema, [500.0, -250.0, 100.0]);
+
+        let mut cfg = InputMappingConfig::default();
+        cfg.button_remaps.insert(
+            crate::mapping::ButtonId::Create,
+            crate::ButtonAction::NextProfile,
+        );
+        let raw_pressed = DualSenseInputState {
+            create: true,
+            ..Default::default()
+        };
+        assert!(has_next_profile_action_pressed(&raw_pressed, &cfg));
+        assert!(!has_next_profile_action_pressed(
+            &DualSenseInputState::default(),
+            &cfg
+        ));
     }
 }

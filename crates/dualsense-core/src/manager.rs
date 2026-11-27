@@ -4,6 +4,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
+use crate::audio_capture::AudioLoopbackWorker;
 use crate::cemuhook::{CemuhookStats, CemuhookUdpServer, DEFAULT_CEMUHOOK_UDP_PORT};
 use crate::emulation::{EmulationConfig, EmulationMode};
 use crate::haptics_audio::{
@@ -11,9 +12,14 @@ use crate::haptics_audio::{
     BT_HAPTICS_BYTES_PER_PACKET, BT_HAPTICS_SAMPLE_RATE_HZ,
 };
 use crate::lightbar::{LightbarMode, LightingConfig, MicLed};
-use crate::mapping::{apply_input_mapping, InputMappingConfig};
+use crate::mapping::{
+    apply_input_mapping, compute_touchpad_mouse_delta, dispatch_os_mouse,
+    has_next_profile_action_pressed, smooth_gyro, GyroActivation, InputMappingConfig, TouchpadMode,
+};
 use crate::profiles::TriggerProfile;
-use crate::protocol::{BatteryState, ConnectionType, DualSenseInputState, OutputReportBuilder};
+use crate::protocol::{
+    BatteryState, ConnectionType, DualSenseInputState, OutputReportBuilder, TouchPoint,
+};
 use crate::storage::{AppConfig, GameProfileRule};
 use crate::triggers::DualTriggerConfig;
 use crate::udp_server::{
@@ -21,7 +27,9 @@ use crate::udp_server::{
 };
 use crate::uhid_dualsense::{is_uhid_available, UhidDualSenseBackend};
 use crate::usbip_dualsense::{is_usbip_client_installed, UsbipVirtualDualSenseServer};
-use crate::vigem::{apply_rumble_gain, is_hidhide_driver_installed, VirtualGamepadBus};
+use crate::vigem::{
+    apply_rumble_gain, is_hidhide_driver_installed, sync_hidhide_for_emulation, VirtualGamepadBus,
+};
 use crate::virtual_device::{
     VirtualControllerBackend, VirtualDualSenseDriverStatus, VirtualFeedbackEvent,
 };
@@ -73,10 +81,11 @@ pub struct DualSenseManager {
     lighting: RwLock<LightingConfig>,
     emulation: RwLock<EmulationConfig>,
     mapping: RwLock<InputMappingConfig>,
-    haptics: RwLock<HapticsConfig>,
+    haptics: Arc<RwLock<HapticsConfig>>,
     haptics_queue: Arc<HapticsFrameQueue>,
     haptics_packets_sent: AtomicU64,
-    haptics_levels: RwLock<(f32, f32)>,
+    haptics_levels: Arc<RwLock<(f32, f32)>>,
+    audio_loopback: parking_lot::Mutex<Option<AudioLoopbackWorker>>,
     rumble_gain: Arc<RwLock<f32>>,
     input_state: RwLock<DualSenseInputState>,
     connected: RwLock<bool>,
@@ -89,6 +98,13 @@ pub struct DualSenseManager {
     game_profile_rules: RwLock<Vec<GameProfileRule>>,
     mic_muted: RwLock<bool>,
     prev_mic_btn: RwLock<bool>,
+    prev_next_profile_btn: RwLock<bool>,
+    active_profile_idx: RwLock<usize>,
+    prev_touch1: RwLock<TouchPoint>,
+    prev_touchpad_click: RwLock<bool>,
+    gyro_toggle_active: RwLock<bool>,
+    prev_gyro_toggle_btn: RwLock<bool>,
+    gyro_ema_state: RwLock<[f32; 3]>,
     audio_device_detected: RwLock<bool>,
     speaker_volume: RwLock<u8>,
     mic_toggle_callback: RwLock<Option<MicToggleHandler>>,
@@ -148,10 +164,11 @@ impl DualSenseManager {
             lighting: RwLock::new(LightingConfig::default()),
             emulation: RwLock::new(EmulationConfig::default()),
             mapping: RwLock::new(InputMappingConfig::default()),
-            haptics: RwLock::new(HapticsConfig::default()),
+            haptics: Arc::new(RwLock::new(HapticsConfig::default())),
             haptics_queue: Arc::new(HapticsFrameQueue::default()),
             haptics_packets_sent: AtomicU64::new(0),
-            haptics_levels: RwLock::new((0.0, 0.0)),
+            haptics_levels: Arc::new(RwLock::new((0.0, 0.0))),
+            audio_loopback: parking_lot::Mutex::new(None),
             rumble_gain,
             input_state: RwLock::new(initial_input),
             connected: RwLock::new(false),
@@ -164,6 +181,13 @@ impl DualSenseManager {
             game_profile_rules: RwLock::new(Vec::new()),
             mic_muted: RwLock::new(false),
             prev_mic_btn: RwLock::new(false),
+            prev_next_profile_btn: RwLock::new(false),
+            active_profile_idx: RwLock::new(0),
+            prev_touch1: RwLock::new(TouchPoint::default()),
+            prev_touchpad_click: RwLock::new(false),
+            gyro_toggle_active: RwLock::new(true),
+            prev_gyro_toggle_btn: RwLock::new(false),
+            gyro_ema_state: RwLock::new([0.0; 3]),
             audio_device_detected: RwLock::new(false),
             speaker_volume: RwLock::new(80),
             mic_toggle_callback: RwLock::new(None),
@@ -193,6 +217,8 @@ impl DualSenseManager {
             self.set_connected(false, "Disconnected");
             self.virtual_bus.lock().unplug();
             self.virtual_dualsense.lock().unplug();
+            *self.audio_loopback.lock() = None;
+            sync_hidhide_for_emulation(false);
         }
         tracing::info!("DualSense extension enabled state set to: {}", enabled);
     }
@@ -444,11 +470,23 @@ impl DualSenseManager {
         config.lowpass_cutoff_hz = config.lowpass_cutoff_hz.clamp(40.0, 500.0);
         config.left_balance = config.left_balance.clamp(0.0, 1.0);
         config.right_balance = config.right_balance.clamp(0.0, 1.0);
+        let want_loopback = config.enabled && config.mode == HapticsMode::AudioToHaptics;
         if !config.enabled || config.mode == HapticsMode::Off {
             self.haptics_queue.clear();
             *self.haptics_levels.write() = (0.0, 0.0);
         }
         *self.haptics.write() = config;
+
+        let mut worker = self.audio_loopback.lock();
+        if want_loopback && worker.is_none() {
+            *worker = Some(AudioLoopbackWorker::start(
+                self.haptics.clone(),
+                self.haptics_queue.clone(),
+                self.haptics_levels.clone(),
+            ));
+        } else if !want_loopback && worker.is_some() {
+            *worker = None;
+        }
         tracing::info!("DualSense Bluetooth HD haptics config updated");
     }
 
@@ -510,6 +548,7 @@ impl DualSenseManager {
         );
         let ok = match config.mode {
             EmulationMode::DualSense => {
+                sync_hidhide_for_emulation(false);
                 self.virtual_bus.lock().unplug();
                 let mut vds = self.virtual_dualsense.lock();
                 if vds.is_available() {
@@ -519,7 +558,13 @@ impl DualSenseManager {
                     *self.usbip_running_flag.read() || is_usbip_client_installed()
                 }
             }
+            EmulationMode::Native => {
+                sync_hidhide_for_emulation(false);
+                self.virtual_dualsense.lock().unplug();
+                self.virtual_bus.lock().set_mode(EmulationMode::Native)
+            }
             other => {
+                sync_hidhide_for_emulation(true);
                 self.virtual_dualsense.lock().unplug();
                 self.virtual_bus.lock().set_mode(other)
             }
@@ -596,6 +641,25 @@ impl DualSenseManager {
 
     pub fn get_game_profile_rules(&self) -> Vec<GameProfileRule> {
         self.game_profile_rules.read().clone()
+    }
+
+    /// Cycles to the next built-in or custom trigger/lightbar profile and returns its ID.
+    pub fn cycle_next_profile(&self) -> Option<String> {
+        let mut all_ids: Vec<String> = self.profiles.read().iter().map(|p| p.id.clone()).collect();
+        all_ids.extend(self.custom_profiles.read().iter().map(|p| p.id.clone()));
+        if all_ids.is_empty() {
+            return None;
+        }
+        let next_id = {
+            let mut idx = self.active_profile_idx.write();
+            *idx = (*idx + 1) % all_ids.len();
+            all_ids[*idx].clone()
+        };
+        if self.apply_profile(&next_id) {
+            Some(next_id)
+        } else {
+            None
+        }
     }
 
     pub fn apply_profile(&self, profile_id: &str) -> bool {
@@ -752,7 +816,84 @@ impl DualSenseManager {
 
     pub fn update_input_state(&self, raw_state: DualSenseInputState) -> Option<bool> {
         let mapping_cfg = self.mapping.read().clone();
-        let mapped_state = apply_input_mapping(&raw_state, &mapping_cfg);
+        let mut mapped_state = apply_input_mapping(&raw_state, &mapping_cfg);
+
+        // Handle GyroActivation::Toggle on touchpad_click rising edge
+        if mapping_cfg.gyro_activation == GyroActivation::Toggle {
+            let prev_gt = *self.prev_gyro_toggle_btn.read();
+            if raw_state.touchpad_click && !prev_gt {
+                let mut active = self.gyro_toggle_active.write();
+                *active = !*active;
+            }
+            *self.prev_gyro_toggle_btn.write() = raw_state.touchpad_click;
+            if !*self.gyro_toggle_active.read() {
+                mapped_state.motion.gyro_x = 0;
+                mapped_state.motion.gyro_y = 0;
+                mapped_state.motion.gyro_z = 0;
+            }
+        }
+
+        // Apply exponential smoothing to gyroscope if configured
+        if mapping_cfg.gyro_smoothing > 0.0 {
+            let prev_ema = *self.gyro_ema_state.read();
+            let (next_ema, (gx, gy, gz)) = smooth_gyro(
+                prev_ema,
+                (
+                    mapped_state.motion.gyro_x,
+                    mapped_state.motion.gyro_y,
+                    mapped_state.motion.gyro_z,
+                ),
+                mapping_cfg.gyro_smoothing,
+            );
+            *self.gyro_ema_state.write() = next_ema;
+            mapped_state.motion.gyro_x = gx;
+            mapped_state.motion.gyro_y = gy;
+            mapped_state.motion.gyro_z = gz;
+        }
+
+        // Handle ButtonAction::NextProfile rising edge
+        let next_prof_pressed = has_next_profile_action_pressed(&raw_state, &mapping_cfg);
+        let prev_next_prof = *self.prev_next_profile_btn.read();
+        if next_prof_pressed && !prev_next_prof {
+            self.cycle_next_profile();
+        }
+        *self.prev_next_profile_btn.write() = next_prof_pressed;
+
+        // Handle TouchpadMode::Mouse OS cursor movement, click, and two-finger scroll
+        if mapping_cfg.touchpad.mode == TouchpadMode::Mouse {
+            let prev_t1 = self.prev_touch1.read().clone();
+            let mut dx = 0i32;
+            let mut dy = 0i32;
+            let mut wheel = 0i32;
+            if let Some((fdx, fdy)) =
+                compute_touchpad_mouse_delta(&prev_t1, &raw_state.touch1, &mapping_cfg.touchpad)
+            {
+                if mapping_cfg.touchpad.two_finger_scroll && raw_state.touch2.active {
+                    let sign = if mapping_cfg.touchpad.invert_scroll {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                    wheel = (fdy * sign * 4.0).round() as i32;
+                } else {
+                    dx = (fdx * 0.65).round() as i32;
+                    dy = (fdy * 0.65).round() as i32;
+                }
+            }
+            let click_edge = if mapping_cfg.touchpad.tap_to_click {
+                let prev_click = *self.prev_touchpad_click.read();
+                if raw_state.touchpad_click != prev_click {
+                    *self.prev_touchpad_click.write() = raw_state.touchpad_click;
+                    Some(raw_state.touchpad_click)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            dispatch_os_mouse(dx, dy, click_edge, wheel);
+        }
+        *self.prev_touch1.write() = raw_state.touch1.clone();
 
         let mut toggled_to = None;
         let prev_pressed = *self.prev_mic_btn.read();
@@ -912,5 +1053,49 @@ mod tests {
         };
         assert_eq!(manager.update_input_state(input_press2), Some(false));
         assert!(!manager.get_status().await.mic_muted);
+    }
+
+    #[tokio::test]
+    async fn test_gyro_toggle_smoothing_and_next_profile_cycle() {
+        let manager = DualSenseManager::new();
+        let mut mapping = InputMappingConfig {
+            gyro_activation: GyroActivation::Toggle,
+            gyro_smoothing: 0.5,
+            ..Default::default()
+        };
+        mapping.button_remaps.insert(
+            crate::mapping::ButtonId::Create,
+            crate::ButtonAction::NextProfile,
+        );
+        manager.set_mapping(mapping);
+
+        // Initially gyro toggle is active -> 0.5 EMA smoothing on 1000 yields 500
+        let mut raw = DualSenseInputState::default();
+        raw.motion.gyro_x = 1000;
+        manager.update_input_state(raw.clone());
+        assert_eq!(manager.get_input_state().motion.gyro_x, 500);
+        assert!(*manager.gyro_toggle_active.read());
+
+        // Press touchpad_click to toggle gyro OFF, and Create to cycle to profile 1
+        raw.touchpad_click = true;
+        raw.create = true;
+        manager.update_input_state(raw.clone());
+        assert!(!*manager.gyro_toggle_active.read());
+        assert_eq!(manager.get_input_state().motion.gyro_x, 250);
+        assert_eq!(*manager.active_profile_idx.read(), 1);
+
+        // Release both; gyro stays OFF
+        raw.touchpad_click = false;
+        raw.create = false;
+        manager.update_input_state(raw.clone());
+        assert!(!*manager.gyro_toggle_active.read());
+        assert_eq!(manager.get_input_state().motion.gyro_x, 125);
+
+        // Press touchpad_click to toggle gyro back ON, and Create to cycle to profile 2
+        raw.touchpad_click = true;
+        raw.create = true;
+        manager.update_input_state(raw);
+        assert!(*manager.gyro_toggle_active.read());
+        assert_eq!(*manager.active_profile_idx.read(), 2);
     }
 }

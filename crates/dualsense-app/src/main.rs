@@ -1,6 +1,6 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -19,13 +19,57 @@ use tracing::{info, warn};
 use tracing_subscriber::fmt::writer::MakeWriter;
 use tracing_subscriber::EnvFilter;
 
+const MAX_LOG_FILE_BYTES: u64 = 20 * 1024 * 1024;
+
+struct LogFileState {
+    file: std::fs::File,
+    bytes_written: u64,
+    max_bytes: u64,
+}
+
+impl LogFileState {
+    fn open(log_path: &Path, max_bytes: u64) -> Option<Self> {
+        let existing_len = std::fs::metadata(log_path).map(|m| m.len()).unwrap_or(0);
+        let truncate = existing_len >= max_bytes;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(truncate)
+            .open(log_path)
+            .ok()?;
+        let bytes_written = if truncate {
+            0
+        } else {
+            file.seek(SeekFrom::End(0)).ok()?;
+            existing_len
+        };
+        Some(Self {
+            file,
+            bytes_written,
+            max_bytes,
+        })
+    }
+
+    fn write_bytes(&mut self, buf: &[u8]) {
+        if self.bytes_written.saturating_add(buf.len() as u64) > self.max_bytes
+            && self.file.set_len(0).is_ok()
+            && self.file.seek(SeekFrom::Start(0)).is_ok()
+        {
+            self.bytes_written = 0;
+        }
+        if self.file.write_all(buf).is_ok() {
+            self.bytes_written = self.bytes_written.saturating_add(buf.len() as u64);
+        }
+    }
+}
+
 #[derive(Clone)]
 struct TeeLogWriter {
-    file: Option<Arc<Mutex<std::fs::File>>>,
+    file: Option<Arc<Mutex<LogFileState>>>,
 }
 
 struct TeeGuard {
-    file: Option<Arc<Mutex<std::fs::File>>>,
+    file: Option<Arc<Mutex<LogFileState>>>,
 }
 
 impl Write for TeeGuard {
@@ -33,7 +77,7 @@ impl Write for TeeGuard {
         let _ = std::io::stdout().write(buf);
         if let Some(f) = &self.file {
             if let Ok(mut guard) = f.lock() {
-                let _ = guard.write_all(buf);
+                guard.write_bytes(buf);
             }
         }
         Ok(buf.len())
@@ -43,7 +87,7 @@ impl Write for TeeGuard {
         let _ = std::io::stdout().flush();
         if let Some(f) = &self.file {
             if let Ok(mut guard) = f.lock() {
-                let _ = guard.flush();
+                let _ = guard.file.flush();
             }
         }
         Ok(())
@@ -60,21 +104,12 @@ impl<'a> MakeWriter<'a> for TeeLogWriter {
     }
 }
 
-fn open_log_file(config_path: &Path) -> Option<Arc<Mutex<std::fs::File>>> {
+fn open_log_file(config_path: &Path) -> Option<Arc<Mutex<LogFileState>>> {
     let dir = config_path.parent()?;
     std::fs::create_dir_all(dir).ok()?;
     let log_path = dir.join("dualsense-studio.log");
-    let truncate = std::fs::metadata(&log_path)
-        .map(|m| m.len() > 1024 * 1024)
-        .unwrap_or(false);
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(truncate)
-        .append(!truncate)
-        .open(log_path)
-        .ok()?;
-    Some(Arc::new(Mutex::new(file)))
+    let state = LogFileState::open(&log_path, MAX_LOG_FILE_BYTES)?;
+    Some(Arc::new(Mutex::new(state)))
 }
 
 #[tokio::main]
@@ -209,4 +244,41 @@ async fn main() -> Result<()> {
     manager.stop_usbip_virtual_dualsense().await;
     hid_worker.stop();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_log_file_truncates_at_max_bytes_during_runtime_and_on_reopen() {
+        let dir = std::env::temp_dir().join(format!(
+            "dualsense_log_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log_path = dir.join("dualsense-studio.log");
+
+        let mut state = LogFileState::open(&log_path, 32).unwrap();
+        state.write_bytes(b"12345678901234567890");
+        assert_eq!(state.bytes_written, 20);
+        state.write_bytes(b"abcdefghijklmnop");
+        assert_eq!(state.bytes_written, 16);
+        state.file.flush().unwrap();
+        drop(state);
+
+        let contents = std::fs::read_to_string(&log_path).unwrap();
+        assert_eq!(contents, "abcdefghijklmnop");
+
+        let reopened = LogFileState::open(&log_path, 16).unwrap();
+        assert_eq!(reopened.bytes_written, 0);
+        drop(reopened);
+        assert_eq!(std::fs::metadata(&log_path).unwrap().len(), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

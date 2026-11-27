@@ -82,13 +82,27 @@ pub fn get_switch_playback_device_command(device_name: &str) -> (&'static str, V
 /// Executes system microphone toggle (non-blocking safe)
 pub fn execute_toggle_microphone() -> Result<(), std::io::Error> {
     let (prog, args) = get_toggle_mic_command();
-    Command::new(prog).args(args).spawn().map(|_| ())
+    let mut cmd = Command::new(prog);
+    cmd.args(args);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    cmd.spawn().map(|_| ())
 }
 
 /// Executes system microphone explicit mute/unmute
 pub fn execute_set_microphone_mute(mute: bool) -> Result<(), std::io::Error> {
     let (prog, args) = get_set_mic_mute_command(mute);
-    Command::new(prog).args(args).spawn().map(|_| ())
+    let mut cmd = Command::new(prog);
+    cmd.args(args);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    cmd.spawn().map(|_| ())
 }
 
 #[cfg(test)]

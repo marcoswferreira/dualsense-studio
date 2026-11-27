@@ -8,6 +8,9 @@ use dualsense_app::process_watcher::ProcessProfileWatcher;
 use dualsense_app::server::{
     is_existing_dualsense_server, start_http_server_with_fallback_and_shutdown, DEFAULT_API_ADDR,
 };
+use dualsense_app::single_instance::{
+    read_active_instance_url, write_active_instance_url, SingleInstanceGuard,
+};
 use dualsense_app::tray::{hide_console_window_if_windows, open_browser, TrayHandle};
 use dualsense_app::updater::check_for_updates;
 use dualsense_core::{default_config_path, AppConfig, DualSenseManager, HidDeviceWorker};
@@ -25,6 +28,21 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
     info!("Starting DualSense Studio v0.1.0 (Standalone Mode)...");
+
+    let api_addr =
+        std::env::var("DUALSENSE_API_ADDR").unwrap_or_else(|_| DEFAULT_API_ADDR.to_string());
+    let bypass_single_instance = api_addr == "127.0.0.1:0"
+        || std::env::var("DUALSENSE_DISABLE_SINGLE_INSTANCE").is_ok_and(|v| v == "1");
+    let _instance_guard = SingleInstanceGuard::try_acquire(bypass_single_instance);
+    if !bypass_single_instance && !_instance_guard.is_primary() {
+        let target_url = read_active_instance_url().unwrap_or_else(|| format!("http://{api_addr}"));
+        info!(
+            "DualSense Studio is already running; opening existing UI at {}",
+            target_url
+        );
+        open_browser(&target_url);
+        return Ok(());
+    }
 
     let config_path: PathBuf = std::env::var("DUALSENSE_CONFIG_PATH")
         .map(PathBuf::from)
@@ -49,8 +67,6 @@ async fn main() -> Result<()> {
     let hid_worker = HidDeviceWorker::start(manager.clone());
     let mut process_watcher = ProcessProfileWatcher::start(manager.clone());
 
-    let api_addr =
-        std::env::var("DUALSENSE_API_ADDR").unwrap_or_else(|_| DEFAULT_API_ADDR.to_string());
     if is_existing_dualsense_server(&api_addr).await {
         info!("DualSense Studio is already running at http://{}", api_addr);
         if args.iter().any(|a| a == "--open-ui") {
@@ -70,6 +86,10 @@ async fn main() -> Result<()> {
         Some(shutdown_tx.clone()),
     )
     .await?;
+
+    if !bypass_single_instance {
+        write_active_instance_url(bound_addr);
+    }
 
     tokio::spawn(async {
         if let Ok(info) = check_for_updates().await {

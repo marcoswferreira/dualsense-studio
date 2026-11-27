@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Palette, Sparkles } from 'lucide-react';
 import { useTranslation } from '../../i18n';
 import { LightingConfig, MicLed, PlayerLed, RgbColor } from '../../types/models';
@@ -37,12 +37,20 @@ const MIC_OPTIONS: { id: MicLed; label: string }[] = [
 export const LightingStudio: React.FC<Props> = ({ lighting: initialLighting, onApply }) => {
   const { t } = useTranslation();
   const [lighting, setLighting] = useState<LightingConfig>(initialLighting);
+  const lastRemoteJson = useRef<string>(JSON.stringify(initialLighting));
+  const localEditUntil = useRef<number>(0);
 
   useEffect(() => {
-    setLighting(initialLighting);
+    const incomingJson = JSON.stringify(initialLighting);
+    if (incomingJson !== lastRemoteJson.current && Date.now() >= localEditUntil.current) {
+      lastRemoteJson.current = incomingJson;
+      setLighting(initialLighting);
+    }
   }, [initialLighting]);
 
   const commit = (updated: LightingConfig) => {
+    localEditUntil.current = Date.now() + 1200;
+    lastRemoteJson.current = JSON.stringify(updated);
     setLighting(updated);
     onApply(updated);
   };

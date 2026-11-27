@@ -31,8 +31,11 @@ pub fn open_browser(url: &str) {
                 return;
             }
         }
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let _ = std::process::Command::new("cmd")
             .args(["/C", "start", "", url])
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn();
     }
     #[cfg(target_os = "linux")]
@@ -478,6 +481,8 @@ mod windows_tray {
     }
 
     fn set_windows_autostart(enabled: bool) {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let exe = match std::env::current_exe() {
             Ok(p) => p,
             Err(_) => return,
@@ -497,10 +502,12 @@ mod windows_tray {
                     &cmd,
                     "/f",
                 ])
+                .creation_flags(CREATE_NO_WINDOW)
                 .output();
         } else {
             let _ = std::process::Command::new("reg")
                 .args(["delete", key, "/v", "DualSenseStudio", "/f"])
+                .creation_flags(CREATE_NO_WINDOW)
                 .output();
         }
     }

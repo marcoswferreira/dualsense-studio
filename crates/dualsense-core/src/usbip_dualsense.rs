@@ -136,8 +136,11 @@ pub fn build_usbip_device_record() -> [u8; 312] {
 pub fn is_usbip_client_installed() -> bool {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         std::process::Command::new("usbip")
             .arg("version")
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .is_ok()
     }

@@ -84,17 +84,20 @@ async fn fetch_json_url(url: &str) -> Result<serde_json::Value> {
     } else {
         "curl"
     };
-    let output = Command::new(curl_bin)
-        .args([
-            "-fsSL",
-            "--max-time",
-            "10",
-            "-H",
-            "Accept: application/vnd.github+json",
-            "-H",
-            "User-Agent: DualSense-Studio-Updater",
-            url,
-        ])
+    let mut cmd = Command::new(curl_bin);
+    cmd.args([
+        "-fsSL",
+        "--max-time",
+        "10",
+        "-H",
+        "Accept: application/vnd.github+json",
+        "-H",
+        "User-Agent: DualSense-Studio-Updater",
+        url,
+    ]);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x0800_0000);
+    let output = cmd
         .output()
         .await
         .with_context(|| format!("Failed to execute {curl_bin} for update check"))?;
@@ -170,17 +173,20 @@ async fn download_file(url: &str, dest: &Path) -> Result<()> {
     let dest_str = dest
         .to_str()
         .ok_or_else(|| anyhow!("Non-UTF8 destination path"))?;
-    let output = Command::new(curl_bin)
-        .args([
-            "-fSL",
-            "--max-time",
-            "120",
-            "-H",
-            "User-Agent: DualSense-Studio-Updater",
-            "-o",
-            dest_str,
-            url,
-        ])
+    let mut cmd = Command::new(curl_bin);
+    cmd.args([
+        "-fSL",
+        "--max-time",
+        "120",
+        "-H",
+        "User-Agent: DualSense-Studio-Updater",
+        "-o",
+        dest_str,
+        url,
+    ]);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x0800_0000);
+    let output = cmd
         .output()
         .await
         .with_context(|| format!("Failed to download {url}"))?;
@@ -220,6 +226,7 @@ pub async fn apply_update(
     #[cfg(target_os = "windows")]
     {
         if asset_name.ends_with(".exe") {
+            use std::os::windows::process::CommandExt;
             let file_str = target_file.to_string_lossy().to_string();
             std::process::Command::new("cmd")
                 .args([
@@ -231,6 +238,7 @@ pub async fn apply_update(
                     "/SILENT",
                     "/CLOSEAPPLICATIONS",
                 ])
+                .creation_flags(0x0800_0000)
                 .spawn()
                 .context("Failed to launch Windows setup installer")?;
 

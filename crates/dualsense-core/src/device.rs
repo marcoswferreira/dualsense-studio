@@ -124,7 +124,26 @@ impl HidDeviceWorker {
                         }
                     });
 
-                    let dev_info = &candidates[0];
+                    let mut opened: Option<(&hidapi::DeviceInfo, hidapi::HidDevice)> = None;
+                    for candidate in &candidates {
+                        let c_path = candidate.path().to_string_lossy();
+                        match candidate.open_device(&api) {
+                            Ok(dev) => {
+                                opened = Some((candidate, dev));
+                                break;
+                            }
+                            Err(e) => {
+                                warn!("Failed to open HID interface ({}): {}", c_path, e);
+                            }
+                        }
+                    }
+
+                    let Some((dev_info, device)) = opened else {
+                        warn!("Could not open any Sony HID interface. Retrying in 2s...");
+                        thread::sleep(Duration::from_secs(2));
+                        continue;
+                    };
+
                     let (name, is_dualsense) = identify_controller(dev_info.product_id());
                     let controller_name = name;
                     let is_ds = is_dualsense;
@@ -144,15 +163,6 @@ impl HidDeviceWorker {
                         dev_info.usage(),
                         connection
                     );
-
-                    let device = match dev_info.open_device(&api) {
-                        Ok(dev) => dev,
-                        Err(e) => {
-                            warn!("Failed to open HID device ({}): {}. Retrying in 2s...", path_str, e);
-                            thread::sleep(Duration::from_secs(2));
-                            continue;
-                        }
-                    };
 
                     // Query Feature Report 0x05 (Calibration data) to unlock DualSense Bluetooth Enhanced Mode (0x31)
                     if is_ds {

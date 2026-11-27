@@ -30,8 +30,11 @@ pub fn match_running_process_rule<'a>(
 pub fn list_running_processes() -> Vec<String> {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let Ok(out) = std::process::Command::new("tasklist")
             .args(["/FO", "CSV", "/NH"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
         else {
             return Vec::new();

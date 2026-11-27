@@ -133,7 +133,10 @@ async fn main() -> Result<()> {
         .with_writer(log_writer)
         .init();
 
-    info!("Starting DualSense Studio v0.1.0 (Standalone Mode)...");
+    info!(
+        "Starting DualSense Studio v{} (Standalone Mode)...",
+        env!("CARGO_PKG_VERSION")
+    );
 
     let api_addr =
         std::env::var("DUALSENSE_API_ADDR").unwrap_or_else(|_| DEFAULT_API_ADDR.to_string());
